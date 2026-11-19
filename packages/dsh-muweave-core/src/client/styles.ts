@@ -2272,6 +2272,11 @@ body[data-ds-dark-theme] .mw-ambient > i {
   to { opacity: 1; transform: none; }
 }
 
+@keyframes mw-compare-in {
+  from { opacity: 0; transform: translateX(0.5rem); }
+  to { opacity: 1; transform: none; }
+}
+
 @keyframes mw-rise {
   from { opacity: 0; transform: translateY(0.5rem); }
   to { opacity: 1; transform: none; }
@@ -4162,6 +4167,9 @@ body[data-ds-dark-theme] .mw-ambient > i {
   flex-direction: column;
   gap: 0.75rem;
   min-width: 0;
+  /* Enters from the right so the two sides read as "current | pinned"; exits instantly because the
+     user has already decided to leave. */
+  animation: mw-compare-in 200ms var(--mw-ease) both;
 }
 
 .mw-compare-head {
@@ -4341,6 +4349,59 @@ body[data-ds-dark-theme] .mw-ambient > i {
   .mw-compare-close,
   .mw-compare-pin {
     transition: none;
+  }
+}
+
+/* ---------- Motion (desk v8, docs/design/motion-spec.md section 4) ----------
+   Feedback only, within the spec time cap, never in the way of a click. The global reduced-motion
+   rule above stops every animation and transition here; only the static hover scale needs its own reset. */
+
+/* M1: a stage switch re-keys the work surface, so its content fades in once. No slide, no height. */
+.mw-stage-work {
+  animation: mw-fade-in 180ms var(--mw-ease-out) both;
+}
+
+/* M2: a hovered variant lifts by scale and a darker hairline, never a shadow. The cell carries the
+   hover so the corner pin over the card keeps it lifted. */
+.mw-stage-variant {
+  transition: transform var(--mw-dur-fast) var(--mw-ease-out);
+}
+
+.mw-stage-variant .mw-stage-thumb[data-shape="variant"] {
+  transition: box-shadow var(--mw-dur-fast) var(--mw-ease-out);
+}
+
+.mw-stage-variant-cell:hover .mw-stage-variant {
+  transform: scale(1.02);
+}
+
+.mw-stage-variant-cell:hover .mw-stage-variant:not([data-current="true"]) .mw-stage-thumb {
+  box-shadow: inset 0 0 0 1px var(--mw-line-strong);
+}
+
+/* M3: the compare pane enters from the right; leaving unmounts it at once. A transition from a
+   starting style instead of a new keyframe: mw-rise and mw-fade-in both move vertically. */
+.mw-compare {
+  transition: opacity var(--mw-dur-base) var(--mw-ease), transform var(--mw-dur-base) var(--mw-ease);
+}
+
+@starting-style {
+  .mw-compare {
+    opacity: 0;
+    transform: translateX(0.5rem);
+  }
+}
+
+/* M4: L3 rows rise 40ms apart. The --mw-stagger step is capped in TSX (queueStagger), so the
+   seventh row on starts with no delay and a long list never drags. */
+.mw-stage-queue > li {
+  animation: mw-rise var(--mw-dur-base) var(--mw-ease-out) both;
+  animation-delay: calc(var(--mw-stagger, 0) * 40ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mw-stage-variant-cell:hover .mw-stage-variant {
+    transform: none;
   }
 }
 `

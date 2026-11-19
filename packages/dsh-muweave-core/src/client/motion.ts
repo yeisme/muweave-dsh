@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
-
-export type MotionStyle = Record<`--mw-${string}`, string>
 
 /** Tracks the user's motion preference without touching window during SSR. */
 export function usePrefersReducedMotion(): boolean {
@@ -26,90 +24,6 @@ export function usePrefersReducedMotion(): boolean {
   }, [])
 
   return reducedMotion
-}
-
-export interface TiltOptions {
-  disabled?: boolean
-}
-
-function motionStyle(values: Record<`--mw-${string}`, string>): MotionStyle {
-  return values as MotionStyle
-}
-
-/** Normalizes pointer position inside an element to the two tilt custom properties. */
-export function useTilt<T extends HTMLElement>(options: TiltOptions = {}): { ref: RefObject<T>; style: MotionStyle } {
-  const ref = useRef<T>(null)
-  const reducedMotion = usePrefersReducedMotion()
-  const [tilt, setTilt] = useState({ x: '0', y: '0' })
-  const disabled = options.disabled === true || reducedMotion
-
-  useEffect(() => {
-    const element = ref.current
-    if (disabled) {
-      setTilt({ x: '0', y: '0' })
-      return
-    }
-    if (!element) return
-
-    const update = (event: PointerEvent) => {
-      const bounds = element.getBoundingClientRect()
-      if (bounds.width <= 0 || bounds.height <= 0) return
-      const x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1
-      const y = ((event.clientY - bounds.top) / bounds.height) * 2 - 1
-      setTilt({ x: String(Math.max(-1, Math.min(1, x))), y: String(Math.max(-1, Math.min(1, y))) })
-    }
-    const reset = () => setTilt({ x: '0', y: '0' })
-
-    element.addEventListener('pointerenter', update)
-    element.addEventListener('pointermove', update)
-    element.addEventListener('pointerleave', reset)
-    return () => {
-      element.removeEventListener('pointerenter', update)
-      element.removeEventListener('pointermove', update)
-      element.removeEventListener('pointerleave', reset)
-    }
-  }, [disabled])
-
-  return {
-    ref,
-    style: useMemo(() => motionStyle({ '--mw-tilt-x': tilt.x, '--mw-tilt-y': tilt.y }), [tilt.x, tilt.y]),
-  }
-}
-
-/** Projects viewport pointer position into bounded parallax custom properties. */
-export function useParallax(strength = 0.35): MotionStyle {
-  const reducedMotion = usePrefersReducedMotion()
-  const [parallax, setParallax] = useState({ x: '0', y: '0' })
-  const amount = Number.isFinite(strength) ? strength : 0.35
-
-  useEffect(() => {
-    if (reducedMotion) {
-      setParallax({ x: '0', y: '0' })
-      return
-    }
-    if (typeof window === 'undefined') return
-    const update = (event: PointerEvent) => {
-      const width = window.innerWidth
-      const height = window.innerHeight
-      if (width <= 0 || height <= 0) return
-      const x = Math.max(-1, Math.min(1, (event.clientX / width) * 2 - 1)) * amount
-      const y = Math.max(-1, Math.min(1, (event.clientY / height) * 2 - 1)) * amount
-      setParallax({ x: String(x), y: String(y) })
-    }
-    const reset = () => setParallax({ x: '0', y: '0' })
-
-    window.addEventListener('pointermove', update)
-    window.addEventListener('blur', reset)
-    return () => {
-      window.removeEventListener('pointermove', update)
-      window.removeEventListener('blur', reset)
-    }
-  }, [amount, reducedMotion])
-
-  return useMemo(
-    () => motionStyle({ '--mw-parallax-x': parallax.x, '--mw-parallax-y': parallax.y }),
-    [parallax.x, parallax.y],
-  )
 }
 
 /**

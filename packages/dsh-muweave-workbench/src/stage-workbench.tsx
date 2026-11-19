@@ -4,7 +4,7 @@
  * an honest placeholder when the bundle has no cover, slots or revision; nothing is invented.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   EmptyState,
   Icon,
@@ -87,6 +87,14 @@ export function focusStageRegion(scope: ParentNode, from: StageRegion, step: 1 |
 }
 
 const ARROW_STEP: Record<string, 1 | -1> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }
+
+/** Motion spec M4: only the first rows of L3 rise one after another; a long list must not keep you waiting. */
+export const QUEUE_STAGGER_LIMIT = 6
+
+/** Stagger step for the L3 row at `index` (CSS multiplies it by 40ms); from the seventh row on it is 0. */
+export function queueStagger(index: number): number {
+  return index >= 0 && index < QUEUE_STAGGER_LIMIT ? index : 0
+}
 
 /** Thumbnail with a real image when the media route resolves, else the fill + hairline grid placeholder. */
 export function StageThumb({
@@ -201,9 +209,21 @@ function VariantBand({
   )
 }
 
-function QueueRow({ el, lang, selected, onOpen }: { el: MuweaveElementSummaryV1; lang: string; selected: boolean; onOpen: () => void }) {
+function QueueRow({
+  el,
+  lang,
+  selected,
+  stagger,
+  onOpen,
+}: {
+  el: MuweaveElementSummaryV1
+  lang: string
+  selected: boolean
+  stagger: number
+  onOpen: () => void
+}) {
   return (
-    <li>
+    <li style={{ '--mw-stagger': String(stagger) } as CSSProperties}>
       <button type="button" className="mw-stage-queue-row" data-current={selected ? 'true' : 'false'} onClick={onOpen}>
         <span className="mw-stage-queue-icon" data-tone={el.stale ? 'warn' : isPending(el) ? 'neutral' : 'ok'}>
           <Icon name={el.stale ? 'warn' : isPending(el) ? 'edit' : 'check'} />
@@ -336,7 +356,7 @@ export function StageWorkbench({
 
   if (!primary) {
     return (
-      <div ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
+      <div key={stage} ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
         {head}
         <div className="mw-stage-empty" data-stage-region="L1" data-stage-empty="true">
           <EmptyState>
@@ -359,8 +379,10 @@ export function StageWorkbench({
 
   const cover = coverDigest(primary)
 
+  // The root is keyed by stage (both branches) so motion spec M1's fade-in replays on every switch.
+
   return (
-    <div ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
+    <div key={stage} ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
       {head}
       <div className="mw-stage-top">
         <section className="mw-stage-level" data-level="L1" data-stage-region="L1">
@@ -436,8 +458,15 @@ export function StageWorkbench({
           <p className="mw-stage-quiet">{en ? 'Nothing waits for you in this stage.' : '这个阶段没有等你处理的事项。'}</p>
         ) : (
           <ul className="mw-stage-queue">
-            {pending.map((el) => (
-              <QueueRow key={el.elementId} el={el} lang={lang} selected={selectedId === el.elementId} onOpen={() => onSelect(el.elementId)} />
+            {pending.map((el, i) => (
+              <QueueRow
+                key={el.elementId}
+                el={el}
+                lang={lang}
+                selected={selectedId === el.elementId}
+                stagger={queueStagger(i)}
+                onOpen={() => onSelect(el.elementId)}
+              />
             ))}
           </ul>
         )}
@@ -448,8 +477,15 @@ export function StageWorkbench({
               <span className="mw-stage-num">{others.length}</span>
             </div>
             <ul className="mw-stage-queue">
-              {others.map((el) => (
-                <QueueRow key={el.elementId} el={el} lang={lang} selected={selectedId === el.elementId} onOpen={() => onSelect(el.elementId)} />
+              {others.map((el, i) => (
+                <QueueRow
+                  key={el.elementId}
+                  el={el}
+                  lang={lang}
+                  selected={selectedId === el.elementId}
+                  stagger={queueStagger(pending.length + i)}
+                  onOpen={() => onSelect(el.elementId)}
+                />
               ))}
             </ul>
           </>

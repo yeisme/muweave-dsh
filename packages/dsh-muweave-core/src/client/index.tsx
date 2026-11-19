@@ -541,9 +541,8 @@ export {
 } from './ui'
 export { statusLabel, statusTone, type MuweaveTone } from './i18n'
 
-/** Desk v5 motion primitives: pointer-driven tilt/parallax plus a reduced-motion probe. */
-export { useParallax, usePrefersReducedMotion, useTilt, useTiltDelegation } from './motion'
-export type { MotionStyle } from './motion'
+/** Desk v5 motion primitives: delegated pointer tilt plus a reduced-motion probe. */
+export { usePrefersReducedMotion, useTiltDelegation } from './motion'
 export type { WorkspaceNotice } from './workspace-shell'
 export {
   ProgressLine,
