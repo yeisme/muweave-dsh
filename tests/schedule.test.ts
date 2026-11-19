@@ -220,3 +220,87 @@ describe('project.clone copies metadata only', () => {
     }
   })
 })
+
+describe('project bind writes durable owner bindings', () => {
+  it('activates the new project on create and persists bindings to disk', async () => {
+    const ws = await mkdtemp(path.join(tmpdir(), 'muweave-bind-'))
+    try {
+      const dataDir = path.join(ws, 'pdata')
+      const svc = new CreatorHostService({ defaultWorkspaceDir: ws, pluginDataDir: dataDir })
+
+      const created = await svc.handleRpcAction('project.create', { title: 'x' })
+      if (!created.ok) throw new Error('create failed')
+      const project = (created.data as { project: { id: string } }).project
+
+      const listed = await svc.handleRpcAction('project.list', {})
+      if (!listed.ok) throw new Error('list failed')
+      expect((listed.data as { activeProjectId?: string }).activeProjectId).toBe(project.id)
+
+      const bound = await svc.handleRpcAction('project.bind', {
+        projectId: project.id,
+        workspaceId: 'ws_alpha',
+        owner: 'eikona',
+        refs: ['run_0001'],
+      })
+      if (!bound.ok) throw new Error('bind failed: ' + bound.error.code)
+
+      const registryPath = path.join(dataDir, 'projects.v1.json')
+      const onDisk = JSON.parse(await readFile(registryPath, 'utf8')) as {
+        projects: Array<{
+          id: string
+          ownerBindings: Array<{ owner: string; refs: string[]; workspaceId: string }>
+          workspaceRefs: string[]
+        }>
+      }
+      const stored = onDisk.projects.find((row) => row.id === project.id)
+      expect(stored).toBeTruthy()
+      expect(stored?.ownerBindings).toHaveLength(1)
+      expect(stored?.ownerBindings[0]).toMatchObject({ owner: 'eikona', workspaceId: 'ws_alpha', refs: ['run_0001'] })
+      expect(stored?.workspaceRefs).toContain('ws_alpha')
+      svc.dispose()
+    } finally {
+      await rm(ws, { recursive: true, force: true })
+    }
+  })
+
+  it('replaces the same workspace+owner instead of appending duplicates', async () => {
+    const ws = await mkdtemp(path.join(tmpdir(), 'muweave-bind2-'))
+    try {
+      const svc = new CreatorHostService({ defaultWorkspaceDir: ws, pluginDataDir: path.join(ws, 'pdata') })
+      const created = await svc.handleRpcAction('project.create', { title: 'y' })
+      if (!created.ok) throw new Error('create failed')
+      const projectId = (created.data as { project: { id: string } }).project.id
+
+      await svc.handleRpcAction('project.bind', { projectId, workspaceId: 'ws_a', owner: 'auctra', refs: ['ep01'] })
+      const second = await svc.handleRpcAction('project.bind', { projectId, workspaceId: 'ws_a', owner: 'auctra', refs: ['ep02'] })
+      if (!second.ok) throw new Error('second bind failed')
+      expect((second.data as { project: { ownerBindings: unknown[] } }).project.ownerBindings).toHaveLength(1)
+      svc.dispose()
+    } finally {
+      await rm(ws, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses to bind into an archived project', async () => {
+    const ws = await mkdtemp(path.join(tmpdir(), 'muweave-bind3-'))
+    try {
+      const svc = new CreatorHostService({ defaultWorkspaceDir: ws, pluginDataDir: path.join(ws, 'pdata') })
+      const created = await svc.handleRpcAction('project.create', { title: 'z' })
+      if (!created.ok) throw new Error('create failed')
+      const projectId = (created.data as { project: { id: string } }).project.id
+      await svc.handleRpcAction('project.archive', { projectId })
+
+      const bound = await svc.handleRpcAction('project.bind', {
+        projectId,
+        workspaceId: 'ws_a',
+        owner: 'scaena',
+        refs: ['breakdown_01'],
+      })
+      expect(bound.ok).toBe(false)
+      if (!bound.ok) expect(bound.error.code).toBe('muweave/project_archived')
+      svc.dispose()
+    } finally {
+      await rm(ws, { recursive: true, force: true })
+    }
+  })
+})
