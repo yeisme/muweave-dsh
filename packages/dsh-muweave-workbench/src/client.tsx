@@ -62,6 +62,7 @@ const zh = {
   bindRefLabel: '安全引用',
   bindHint: '只接受不透明引用，绑定后自动同步 .muweave/。',
   boundReceipt: '已绑定 {target} 并刷新 .muweave/',
+  syncFailed: '同步没有完成，请稍后重试。',
   closeInspector: '关闭详情',
   fieldId: '元件 ID',
   fieldOwner: '来源',
@@ -121,6 +122,7 @@ const en: Record<keyof typeof zh, string> = {
   bindRefLabel: 'Opaque Ref',
   bindHint: 'Only opaque refs are accepted; .muweave/ syncs after binding.',
   boundReceipt: 'Bound {target} and refreshed .muweave/',
+  syncFailed: 'Sync did not finish; try again shortly.',
   closeInspector: 'Close Inspector',
   fieldId: 'Element ID',
   fieldOwner: 'Owner',
@@ -300,6 +302,20 @@ export function WorkbenchMainPage({
     await loadList()
   }
 
+  /** The empty stage's 「去同步」: the same bundle.sync the toolbar runs, with failures surfaced, not thrown. */
+  const syncStage = async () => {
+    try {
+      const res = await rpc.call('bundle.sync', {})
+      if (!res?.ok) {
+        setNotice({ tone: 'bad', text: res?.error?.message ?? t('syncFailed') })
+        return
+      }
+      await loadList()
+    } catch (err) {
+      setNotice({ tone: 'bad', text: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
   /** Builds the compare pane's props from the current stage selection plus one pinned subject. */
   const comparePaneProps = (pinned: CompareSubject | null) => {
     const el = elements.find((e) => e.elementId === selectedId) ?? pickPrimary(stageGroups[currentStage], selectedId)
@@ -426,6 +442,8 @@ export function WorkbenchMainPage({
             onSelect={setSelectedId}
             onPinCompare={(subject, trigger) => pinCompare(onPinCompare, subject, trigger)}
             onPinVariant={(subject, trigger) => pinCompare(onPinCompare, subject, trigger)}
+            onDismiss={() => setSelectedId(undefined)}
+            onSync={() => void syncStage()}
           />
         </div>
       </div>

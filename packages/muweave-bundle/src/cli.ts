@@ -43,14 +43,90 @@ function parseArgv(argv: readonly string[]): ParsedFlags {
   return { positional, flags }
 }
 
-function emit(payload: Record<string, unknown>, flags: Record<string, string | boolean>): void {
+const ANSI_ESCAPE = new RegExp('\\x1b\\[[0-?]*[ -/]*[@-~]', 'g')
+
+function cleanAgentValue(value: string): string {
+  return value.replace(ANSI_ESCAPE, '').replace(/\r?\n|\r/g, '\\n')
+}
+
+function stableId(value: Record<string, unknown>): string | undefined {
+  const entries = Object.entries(value)
+  const idEntry = entries.find(([key, candidate]) => /(?:id|ref)$/i.test(key) && (typeof candidate === 'string' || typeof candidate === 'number'))
+  return idEntry ? String(idEntry[1]) : undefined
+}
+
+function agentPrefix(key: string): { prefix: 'fact' | 'action' | 'evidence' | 'error'; path: string } {
+  const normalized = key.toLowerCase()
+  if (normalized === 'error') return { prefix: 'error', path: '' }
+  if (normalized === 'action' || normalized === 'actions') return { prefix: 'action', path: '' }
+  if (normalized === 'evidence' || normalized === 'evidences') return { prefix: 'evidence', path: '' }
+  return { prefix: 'fact', path: key }
+}
+
+function arrayElementId(value: unknown): string | undefined {
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  if (value && typeof value === 'object' && !Array.isArray(value)) return stableId(value as Record<string, unknown>)
+  return undefined
+}
+
+function flattenAgentValue(
+  value: unknown,
+  keyPath: string,
+  prefix: 'fact' | 'action' | 'evidence' | 'error',
+  lines: string[],
+  inheritedId?: string,
+): void {
+  if (value === undefined) return
+  if (typeof value === 'string') {
+    if (value.length > 120) {
+      const ref = inheritedId ? `text:${inheritedId}` : undefined
+      lines.push(`${prefix}.${keyPath}${ref ? '_ref' : '_length'}=${ref ?? value.length}`)
+    } else {
+      lines.push(`${prefix}.${keyPath}=${cleanAgentValue(value)}`)
+    }
+    return
+  }
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+    lines.push(`${prefix}.${keyPath}=${String(value)}`)
+    return
+  }
+  if (Array.isArray(value)) {
+    lines.push(`${prefix}.${keyPath}_count=${value.length}`)
+    const ids = value.map(arrayElementId)
+    if (value.length > 0 && ids.every((id): id is string => id !== undefined)) {
+      lines.push(`${prefix}.${keyPath}=${ids.map(cleanAgentValue).join(',')}`)
+    }
+    return
+  }
+
+  const objectValue = value as Record<string, unknown>
+  const objectId = stableId(objectValue) ?? inheritedId
+  for (const [key, child] of Object.entries(objectValue)) {
+    const childPath = keyPath ? `${keyPath}.${key}` : key
+    flattenAgentValue(child, childPath, prefix, lines, objectId)
+  }
+}
+
+/** Agent facts use fact.; command actions, evidence, and failures use action., evidence., and error. respectively. */
+export function renderAgentOutput(payload: Record<string, unknown>, command: string): string {
+  const failed = payload.ok === false || payload.error !== undefined || payload.status === 'failed' || payload.status === 'error'
+  const payloadId = stableId(payload)
+  const lines = [`spec_version=1.0`, `mode=agent`, `command=${cleanAgentValue(command)}`, `status=${failed ? 'failed' : 'success'}`]
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === 'command' || key === 'status') continue
+    const { prefix, path: keyPath } = agentPrefix(key)
+    flattenAgentValue(value, keyPath, prefix, lines, payloadId)
+  }
+  return `${lines.join('\n')}\n`
+}
+
+function emit(payload: Record<string, unknown>, flags: Record<string, string | boolean>, command = 'muweave-bundle.unknown'): void {
   if (flags.json) {
     process.stdout.write(`${JSON.stringify(payload)}\n`)
     return
   }
   if (flags.agent) {
-    const lines = Object.entries(payload).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
-    process.stdout.write(`${lines.join('\n')}\n`)
+    process.stdout.write(renderAgentOutput(payload, command))
     return
   }
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
@@ -85,18 +161,18 @@ export async function runMuweaveBundleCli(argv: readonly string[]): Promise<numb
           title: typeof flags.title === 'string' ? flags.title : undefined,
           projectId: typeof flags['project-id'] === 'string' ? flags['project-id'] : undefined,
         })
-        emit({ ok: true, command: 'muweave-bundle.init', projectId: manifest.projectId, revision: manifest.revision }, flags)
+        emit({ ok: true, command: 'muweave-bundle.init', projectId: manifest.projectId, revision: manifest.revision }, flags, 'muweave-bundle.init')
         return 0
       }
       case 'bind': {
         const target = positional[1] as BindingTargetKind | undefined
         const ref = positional[2]
         if (!target || !ref) {
-          emit({ ok: false, error: { code: 'invalid_arguments', message: 'Usage: muweave-bundle bind <target> <ref>' } }, flags)
+          emit({ ok: false, error: { code: 'invalid_arguments', message: 'Usage: muweave-bundle bind <target> <ref>' } }, flags, 'muweave-bundle.bind')
           return 2
         }
         const manifest = await bindBundleRef(workspaceDir, target, ref)
-        emit({ ok: true, command: 'muweave-bundle.bind', target, ref, revision: manifest.revision }, flags)
+        emit({ ok: true, command: 'muweave-bundle.bind', target, ref, revision: manifest.revision }, flags, 'muweave-bundle.bind')
         return 0
       }
       case 'sync': {
@@ -111,6 +187,7 @@ export async function runMuweaveBundleCli(argv: readonly string[]): Promise<numb
             ownerStates: index.ownerStates,
           },
           flags,
+          'muweave-bundle.sync',
         )
         return 0
       }
@@ -118,16 +195,16 @@ export async function runMuweaveBundleCli(argv: readonly string[]): Promise<numb
         const elementId = positional[1]
         if (elementId) {
           const element = await readElementFromDisk(workspaceDir, elementId)
-          emit({ ok: true, command: 'muweave-bundle.inspect', element }, flags)
+          emit({ ok: true, command: 'muweave-bundle.inspect', element }, flags, 'muweave-bundle.inspect')
         } else {
           const index = await readBundleIndexFromDisk(workspaceDir)
-          emit({ ok: true, command: 'muweave-bundle.inspect', index }, flags)
+          emit({ ok: true, command: 'muweave-bundle.inspect', index }, flags, 'muweave-bundle.inspect')
         }
         return 0
       }
       case 'validate': {
         const report = await validateBundleOnDisk(workspaceDir)
-        emit({ command: 'muweave-bundle.validate', ...report }, flags)
+        emit({ command: 'muweave-bundle.validate', ...report }, flags, 'muweave-bundle.validate')
         return report.ok ? 0 : 1
       }
       case 'doctor': {
@@ -139,11 +216,11 @@ export async function runMuweaveBundleCli(argv: readonly string[]): Promise<numb
           scaena: existsSync(path.join(ws, '.scaena', 'project.json')),
           pi: existsSync(path.join(ws, '.pi')),
         }
-        emit({ ok: true, command: 'muweave-bundle.doctor', markers }, flags)
+        emit({ ok: true, command: 'muweave-bundle.doctor', markers }, flags, 'muweave-bundle.doctor')
         return 0
       }
       default:
-        emit({ ok: false, error: { code: 'unknown_command', message: `Unknown command: ${cmd}` } }, flags)
+        emit({ ok: false, error: { code: 'unknown_command', message: `Unknown command: ${cmd}` } }, flags, `muweave-bundle.${cmd}`)
         return 2
     }
   } catch (err) {
@@ -156,6 +233,7 @@ export async function runMuweaveBundleCli(argv: readonly string[]): Promise<numb
         },
       },
       flags,
+      `muweave-bundle.${cmd}`,
     )
     return 1
   }

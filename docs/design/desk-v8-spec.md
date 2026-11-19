@@ -75,13 +75,28 @@ v8 的检验：
 
 ### P3：清死代码
 
-| 对象 | 判定 | 动作 |
+| 对象 | 判定（已核实） | 动作 |
 | --- | --- | --- |
-| `DramaSessionView`（`session-view.tsx`） | 只被 `index.tsx` 导出，**零挂载** | **删除**：占用思路已由右栏工具目录承载 |
-| `ToolRunCard` | 已接进生成台任务列表（`generation.tsx:305`） | **保留** |
+| `DramaSessionView`（`session-view.tsx`） | **活代码，不能删** | **保留** |
+| `ToolRunCard` | 已接进生成台任务列表（`generation.tsx:305`） | 保留 |
 | `ProjectPanel` | 已挂项目条 | 保留 |
 
-删 `DramaSessionView` 时同步删 `index.tsx` 的导出与 `styles.ts` 里只有它用的 `mw-sv-*` 样式（先 grep 确认无其他引用）。
+### 结论修正（2026-11-19，我原本写错了）
+
+本 spec 初稿写的是「`DramaSessionView` 只被导出、零挂载，应删除」。**这是错的**，依据是我用 `grep 'packages/*/src/*.tsx'` 这个 glob 搜索——它匹配不到 `packages/dsh-muweave-core/src/client/` 的深度，所以什么都没搜到，我误判成零引用。
+
+实际引用（用 `grep -rn` 直搜目录核实）：
+
+| 位置 | 用途 |
+| --- | --- |
+| `core/src/client/index.tsx:27,451` | import + **真实挂载**（「做剧」会话视图） |
+| `drama/src/client.tsx` | 传入该视图的 props |
+| `scripts/inner-e2e-runner.mjs:638-640` | e2e 断言 `[data-muweave-session-view]` 可见并检查「制作进度」分组 |
+| `tests/theater.test.tsx`、`tests/tool-catalog-ui.test.tsx` | 3 项测试直接渲染它 |
+
+照原 spec 删掉会**破坏 e2e 与 3 项测试**。
+
+**教训**：本仓库的源码深度是 `packages/<pkg>/src/client/`，任何 `packages/*/src/*.tsx` 形式的 glob 都搜不到文件。一律用 `grep -rn <pattern> packages/`。
 
 ## 3. 美化收尾（全量）
 

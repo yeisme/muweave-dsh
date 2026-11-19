@@ -11,6 +11,9 @@ import {
   StatusTag,
   formatKeyHint,
   getActiveTheaterRoomId,
+  isEditableTarget,
+  keyBinding,
+  matchKey,
   statusLabel,
   useMediaUrl,
   type JobRecordV1,
@@ -38,11 +41,52 @@ const OVERVIEW_ROOM_ID = 'muweave-workbench'
 /** Pins a compare side; `trigger` is where focus returns when the compare pane closes. */
 export type PinCompareHandler = (subject: CompareSubject, trigger?: HTMLElement | null) => void
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
+const COMPARE_KEY = keyBinding('stage-compare')
+const REGION_NEXT_KEY = keyBinding('stage-region-next')
+const REGION_PREV_KEY = keyBinding('stage-region-prev')
+const DISMISS_KEY = keyBinding('stage-dismiss')
+
+/**
+ * Desk v8 P2 Tab order: Tab hops between whole regions instead of every button, arrows move inside
+ * one. The inspector is the shell's column, found by its existing pane marker.
+ */
+export const STAGE_REGIONS = ['axis', 'L1', 'L2', 'L3', 'inspector'] as const
+export type StageRegion = (typeof STAGE_REGIONS)[number]
+
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const INSPECTOR = '[data-muweave-pane="inspector"]'
+
+export function stageRegionOf(node: Element | null): StageRegion | undefined {
+  if (!node) return undefined
+  if (node.closest(INSPECTOR)) return 'inspector'
+  const region = node.closest('[data-stage-region]')?.getAttribute('data-stage-region')
+  return STAGE_REGIONS.find((r) => r === region)
 }
+
+function regionFocusables(scope: ParentNode, region: StageRegion): HTMLElement[] {
+  const selector = region === 'inspector' ? INSPECTOR : `[data-stage-region="${region}"]`
+  return Array.from(scope.querySelectorAll<HTMLElement>(selector)).flatMap((node) => Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)))
+}
+
+/** A region is entered on its current item (stage row, chosen variant, selected queue row), else its first. */
+function regionEntry(scope: ParentNode, region: StageRegion): HTMLElement | undefined {
+  const items = regionFocusables(scope, region)
+  return items.find((item) => item.getAttribute('data-current') === 'true') ?? items[0]
+}
+
+/** Moves focus to the next / previous region that has something focusable. False leaves Tab native. */
+export function focusStageRegion(scope: ParentNode, from: StageRegion, step: 1 | -1): boolean {
+  for (let i = STAGE_REGIONS.indexOf(from) + step; i >= 0 && i < STAGE_REGIONS.length; i += step) {
+    const target = regionEntry(scope, STAGE_REGIONS[i]!)
+    if (target) {
+      target.focus()
+      return true
+    }
+  }
+  return false
+}
+
+const ARROW_STEP: Record<string, 1 | -1> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }
 
 /** Thumbnail with a real image when the media route resolves, else the fill + hairline grid placeholder. */
 export function StageThumb({
@@ -106,7 +150,7 @@ function VariantBand({
   const [chosen, setChosen] = useState<string | undefined>(accepted)
   const en = lang === 'en'
   return (
-    <section className="mw-stage-level" data-level="L2">
+    <section className="mw-stage-level" data-level="L2" data-stage-region="L2">
       <div className="mw-stage-eyebrow">
         <span>{en ? 'Variants' : '变体'}</span>
         <span className="mw-stage-num">{slots.length}</span>
@@ -189,6 +233,8 @@ export function StageWorkbench({
   onSelect,
   onPinCompare,
   onPinVariant,
+  onDismiss,
+  onSync,
 }: {
   rpc: MuweaveRpcClient
   stage: StageId
@@ -199,6 +245,10 @@ export function StageWorkbench({
   onPinCompare: PinCompareHandler
   /** Variant band corner pin; the caller also switches the layout to compare. Absent hides the pins. */
   onPinVariant?: PinCompareHandler
+  /** Esc with an element selected and no compare open: closes its inspector detail (the inspector × does the same). */
+  onDismiss?: () => void
+  /** The empty stage's 「去同步」; absent hides the button. */
+  onSync?: () => void
 }) {
   const jobs = useJobs(rpc)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -218,16 +268,45 @@ export function StageWorkbench({
   pinRef.current = () => {
     if (primary) pinBaseline(primary, baselineBtnRef.current)
   }
+  const dismissRef = useRef<(() => void) | undefined>(undefined)
+  dismissRef.current = selectedId ? onDismiss : undefined
   useEffect(() => {
     const onKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key !== 'c' || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return
       if (ev.defaultPrevented || ev.isComposing || isEditableTarget(ev.target)) return
       if (ev.target instanceof Element && ev.target.closest('[role="dialog"], [role="menu"]')) return
       const room = getActiveTheaterRoomId()
       if (room && room !== OVERVIEW_ROOM_ID) return
-      if (!rootRef.current?.isConnected) return
-      ev.preventDefault()
-      pinRef.current()
+      const root = rootRef.current
+      if (!root?.isConnected) return
+      const scope: ParentNode = root.closest('[data-muweave-workspace-root="true"]') ?? root.ownerDocument
+      if (COMPARE_KEY && matchKey(ev, COMPARE_KEY)) {
+        ev.preventDefault()
+        pinRef.current()
+        return
+      }
+      if (DISMISS_KEY && matchKey(ev, DISMISS_KEY)) {
+        // Compare pane and shell popovers take Escape first; this only closes the inspector detail.
+        if (!dismissRef.current || scope.querySelector('[data-popover="true"]')) return
+        ev.preventDefault()
+        dismissRef.current()
+        return
+      }
+      const active = root.ownerDocument.activeElement
+      const from = active instanceof HTMLElement && scope.contains(active) ? stageRegionOf(active) : undefined
+      if (!from) return
+      const forward = REGION_NEXT_KEY && matchKey(ev, REGION_NEXT_KEY)
+      if (forward || (REGION_PREV_KEY && matchKey(ev, REGION_PREV_KEY))) {
+        if (focusStageRegion(scope, from, forward ? 1 : -1)) ev.preventDefault()
+        return
+      }
+      const step = ARROW_STEP[ev.key]
+      if (step === undefined || from === 'inspector' || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return
+      const items = regionFocusables(scope, from)
+      const next = items[items.indexOf(active as HTMLElement) + step]
+      if (next) {
+        ev.preventDefault()
+        next.focus()
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -245,10 +324,12 @@ export function StageWorkbench({
           <b className="mw-stage-num">{pending.length}</b> {en ? 'pending' : '待处理'}
         </span>
       </span>
-      <span className="mw-stage-work-hints">
+      <span className="mw-stage-work-hints" aria-hidden="true">
         <kbd>{formatKeyHint('j')}</kbd>
         <kbd>{formatKeyHint('k')}</kbd>
         <span>{en ? 'switch stage' : '切换阶段'}</span>
+        <kbd>Tab</kbd>
+        <span>{en ? 'next region' : '切换区块'}</span>
       </span>
     </header>
   )
@@ -257,15 +338,21 @@ export function StageWorkbench({
     return (
       <div ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
         {head}
-        <EmptyState>
-          {stage === 'sound'
-            ? en
-              ? 'No owner produces sound elements yet; this stage lights up once one does.'
-              : '还没有 owner 产出声音元件，接入数据后这一阶段才会亮起。'
-            : en
-              ? 'No elements in this stage yet.'
-              : '这个阶段还没有元件。'}
-        </EmptyState>
+        <div className="mw-stage-empty" data-stage-region="L1" data-stage-empty="true">
+          <EmptyState>
+            {en ? 'Nothing produced in this stage yet.' : '本阶段还没有产物'}
+            {stage === 'sound' ? (
+              <small>{en ? 'No owner produces sound elements yet; this stage lights up once one does.' : '还没有 owner 产出声音元件，接入数据后这一阶段才会亮起。'}</small>
+            ) : null}
+          </EmptyState>
+          {/* Sound has no owner to collect from, so a sync there would promise something it cannot do. */}
+          {onSync && stage !== 'sound' ? (
+            <button type="button" className="mw-dsh-btn" data-size="sm" data-stage-sync="true" onClick={onSync}>
+              <Icon name="sync" />
+              {en ? 'Go sync' : '去同步'}
+            </button>
+          ) : null}
+        </div>
       </div>
     )
   }
@@ -276,7 +363,7 @@ export function StageWorkbench({
     <div ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
       {head}
       <div className="mw-stage-top">
-        <section className="mw-stage-level" data-level="L1">
+        <section className="mw-stage-level" data-level="L1" data-stage-region="L1">
           <div className="mw-stage-eyebrow">
             <span>{en ? 'Primary' : '主产物'}</span>
           </div>
@@ -301,6 +388,10 @@ export function StageWorkbench({
                 >
                   {en ? 'Compare baseline' : '对比基线'}
                 </button>
+                {/* Outside the button so its name stays the label; aria-keyshortcuts carries the key. */}
+                <kbd className="mw-key-hint" aria-hidden="true">
+                  {formatKeyHint('c')}
+                </kbd>
               </span>
               <span className="mw-stage-primary-status">
                 <StatusTag status={primary.stale ? 'stale' : primary.status} lang={lang} />
@@ -335,7 +426,7 @@ export function StageWorkbench({
           </dl>
         </div>
       </div>
-      <section className="mw-stage-level" data-level="L3">
+      <section className="mw-stage-level" data-level="L3" data-stage-region="L3">
         <div className="mw-stage-eyebrow">
           <span>{en ? 'Pending' : '待办'}</span>
           <span className="mw-stage-num">{pending.length}</span>
@@ -364,7 +455,7 @@ export function StageWorkbench({
           </>
         ) : null}
       </section>
-      <footer className="mw-stage-versions" data-level="versions">
+      <footer className="mw-stage-versions" data-level="versions" data-stage-region="L3">
         <span className="mw-stage-quiet">{en ? 'Version' : '版本'}</span>
         {version ? (
           <>

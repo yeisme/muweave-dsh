@@ -3581,7 +3581,7 @@ body[data-ds-dark-theme] .mw-ambient > i {
 
 .mw-stage-axis kbd,
 .mw-stage-work-hints kbd {
-  font-family: inherit;
+  font-family: var(--mw-mono);
   font-size: 0.6875rem;
   line-height: 1;
   padding: 0.1875rem 0.3125rem;
@@ -3590,6 +3590,31 @@ body[data-ds-dark-theme] .mw-ambient > i {
   color: var(--mw-label-2);
   box-shadow: 0 0 0 1px var(--mw-line-strong);
   font-variant-numeric: tabular-nums;
+}
+
+/* Desk v8 P2 inline accelerator hint (NN/g): sits beside its button, quieter and monospaced, never on top. */
+.mw-key-hint {
+  flex: none;
+  font-family: var(--mw-mono);
+  font-size: 0.6875rem;
+  line-height: 1;
+  color: var(--mw-label-3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.mw-stage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 1.5rem;
+}
+
+.mw-stage-empty .mw-empty small {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--mw-label-3);
 }
 
 .mw-stage-work {
@@ -3766,6 +3791,7 @@ body[data-ds-dark-theme] .mw-ambient > i {
   grid-row: 1 / span 2;
   grid-column: 2;
   display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
 
@@ -4003,18 +4029,101 @@ body[data-ds-dark-theme] .mw-ambient > i {
   .mw-stage-top {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  /* Spec 3.2: the axis narrows to 9rem; a clipped stage name is restored by the row title. */
+  .mw-stage-layout {
+    grid-template-columns: 9rem minmax(0, 1fr);
+  }
+
+  .mw-stage-row,
+  .mw-stage-axis-head,
+  .mw-stage-axis-note,
+  .mw-stage-axis-keys {
+    padding-inline: 0.75rem;
+  }
+
+  .mw-stage-row {
+    gap: 0.5rem;
+  }
+
+  .mw-stage-work {
+    padding-inline: 1rem;
+  }
 }
 
+/* Spec 3.2: at 48rem and below the axis folds into one wrapping chip row above the workbench. It
+   stays visible: hiding it would hide where the stages are. */
 @media (max-width: 48rem) {
   .mw-stage-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .mw-stage-axis {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
     border-right: 0;
     border-bottom: 1px solid var(--mw-line);
   }
 
+  .mw-stage-axis-head {
+    flex: none;
+    height: auto;
+    padding: 0;
+  }
+
+  .mw-stage-axis-head .mw-stage-num,
+  .mw-stage-axis-note,
+  .mw-stage-axis-keys {
+    display: none;
+  }
+
+  .mw-stage-axis-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    min-width: 0;
+  }
+
+  .mw-stage-row {
+    width: auto;
+    height: 1.75rem;
+    padding: 0 0.625rem;
+    gap: 0.375rem;
+    border-radius: var(--mw-r-pill);
+    box-shadow: inset 0 0 0 1px var(--mw-line);
+  }
+
+  .mw-stage-row[data-current="true"]::before {
+    display: none;
+  }
+
+  .mw-stage-row[data-current="true"] {
+    box-shadow: inset 0 0 0 1px var(--mw-line-strong);
+  }
+
+  .mw-stage-name {
+    flex: none;
+  }
+
+  .mw-stage-total {
+    min-width: 0;
+  }
+
+  .mw-stage-work {
+    padding-inline: 0.75rem;
+  }
+
+  .mw-stage-work-hints {
+    display: none;
+  }
+}
+
+/* Touch-only devices have no keys to press: the accelerator hints would just be noise there. */
+@media (hover: none) and (pointer: coarse) {
+  .mw-key-hint,
+  .mw-stage-work-hints,
   .mw-stage-axis-keys {
     display: none;
   }

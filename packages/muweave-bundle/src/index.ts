@@ -1,4 +1,4 @@
 export * from './schema'
 export * from './consumer'
 export * from './compiler'
-export { runMuweaveBundleCli } from './cli'
+export { renderAgentOutput, runMuweaveBundleCli } from './cli'

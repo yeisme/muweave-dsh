@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef } from 'react'
-import { Icon, type MuweaveRpcClient } from '@yeisme/dsh-muweave-core/client'
+import { Icon, formatKeyHint, isEditableTarget, type MuweaveRpcClient } from '@yeisme/dsh-muweave-core/client'
 import { StageThumb } from './stage-workbench'
 import { compareSummary, shortTime, type CompareSubject, type CompareSummary } from './stage-map'
 
@@ -103,12 +103,6 @@ function CompareSideCard({
   )
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
-}
-
 export function ComparePane({ rpc, lang, current, compare, onClose }: ComparePaneProps) {
   const en = lang === 'en'
   const rootRef = useRef<HTMLElement | null>(null)
@@ -152,6 +146,9 @@ export function ComparePane({ rpc, lang, current, compare, onClose }: ComparePan
             </span>
           ))}
         </span>
+        <kbd className="mw-key-hint" aria-hidden="true">
+          {formatKeyHint('Escape')}
+        </kbd>
         <button
           type="button"
           className="mw-compare-close"

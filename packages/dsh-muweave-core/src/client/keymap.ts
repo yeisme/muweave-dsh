@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 
-export type KeymapScope = 'global' | 'calendar' | 'palette'
+export type KeymapScope = 'global' | 'calendar' | 'palette' | 'stage'
 
 export interface KeyBinding {
   id: string
@@ -30,9 +30,29 @@ export const MUWEAVE_KEYMAP: readonly KeyBinding[] = [
   { id: 'palette-complete', keys: ['Tab'], scope: 'palette', labelZh: '补全当前命令', labelEn: 'Complete current command' },
   { id: 'palette-run', keys: ['Enter'], scope: 'palette', labelZh: '执行当前命令', labelEn: 'Run current command' },
   { id: 'close-overlay', keys: ['Escape'], scope: 'palette', labelZh: '关闭覆盖层', labelEn: 'Close overlay' },
+  // Desk v8 P2: Overview stage accelerators. Each one mirrors a visible button or row (NN/g accelerators).
+  { id: 'stage-next', keys: ['j'], scope: 'stage', labelZh: '下一阶段', labelEn: 'Next stage' },
+  { id: 'stage-prev', keys: ['k'], scope: 'stage', labelZh: '上一阶段', labelEn: 'Previous stage' },
+  { id: 'stage-jump', keys: ['g', '1-5'], scope: 'stage', labelZh: '跳到第 N 阶段', labelEn: 'Jump to stage N' },
+  { id: 'stage-compare', keys: ['c'], scope: 'stage', labelZh: '对比基线', labelEn: 'Compare baseline' },
+  { id: 'stage-region-next', keys: ['Tab'], scope: 'stage', labelZh: '下一区块', labelEn: 'Next region' },
+  { id: 'stage-region-prev', keys: ['shift+Tab'], scope: 'stage', labelZh: '上一区块', labelEn: 'Previous region' },
+  { id: 'stage-dismiss', keys: ['Escape'], scope: 'stage', labelZh: '退出对比 / 关闭详情', labelEn: 'Close compare / inspector' },
 ] as const
 
 export const keymap = MUWEAVE_KEYMAP
+
+/** Looks a binding up by id; the stage surfaces read their keys from here instead of redeclaring them. */
+export function keyBinding(id: string): KeyBinding | undefined {
+  return MUWEAVE_KEYMAP.find((binding) => binding.id === id)
+}
+
+/** True for fields that own their keystrokes: single-letter accelerators must not fire while typing. */
+export function isEditableTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
+}
 
 function defaultKeyHintPlatform(): 'mac' | 'other' {
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? '') ? 'mac' : 'other'
@@ -84,7 +104,7 @@ export function matchKey(event: KeyboardEvent, binding: KeyBinding): boolean {
 }
 
 export function groupBindings(bindings: readonly KeyBinding[]): Record<KeymapScope, KeyBinding[]> {
-  const grouped: Record<KeymapScope, KeyBinding[]> = { global: [], calendar: [], palette: [] }
+  const grouped: Record<KeymapScope, KeyBinding[]> = { global: [], calendar: [], palette: [], stage: [] }
   for (const binding of bindings) grouped[binding.scope].push(binding)
   return grouped
 }

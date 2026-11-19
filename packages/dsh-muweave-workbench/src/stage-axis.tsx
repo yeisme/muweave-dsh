@@ -4,23 +4,21 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react'
-import { formatKeyHint, getActiveTheaterRoomId, type MuweaveElementSummaryV1 } from '@yeisme/dsh-muweave-core/client'
-// The client entry does not re-export the sequence helpers; core is inlined per plugin bundle anyway.
-import { matchKey, useKeySequence, type KeyBinding } from '../../dsh-muweave-core/src/client/keymap'
+import {
+  formatKeyHint,
+  getActiveTheaterRoomId,
+  isEditableTarget,
+  keyBinding,
+  matchKey,
+  useKeySequence,
+  type MuweaveElementSummaryV1,
+} from '@yeisme/dsh-muweave-core/client'
 import { STAGES, pendingCount, stageAtDigit, stageDotState, stepStage, type StageDotState, type StageId } from './stage-map'
 
 const OVERVIEW_ROOM_ID = 'muweave-workbench'
 
-const STAGE_BINDINGS: readonly KeyBinding[] = [
-  { id: 'stage-next', keys: ['j'], scope: 'global', labelZh: '下一阶段', labelEn: 'Next stage' },
-  { id: 'stage-prev', keys: ['k'], scope: 'global', labelZh: '上一阶段', labelEn: 'Previous stage' },
-]
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
-}
+const NEXT_STAGE = keyBinding('stage-next')
+const PREV_STAGE = keyBinding('stage-prev')
 
 function StageDot({ state }: { state: StageDotState }) {
   return (
@@ -63,9 +61,8 @@ export function StageAxis({
       if (room && room !== OVERVIEW_ROOM_ID) return
       if (!rootRef.current?.isConnected) return
       if (feedSequence(ev)) return
-      const [next, prev] = STAGE_BINDINGS
-      if (next && matchKey(ev, next)) onSelectRef.current(stepStage(currentRef.current, 1))
-      else if (prev && matchKey(ev, prev)) onSelectRef.current(stepStage(currentRef.current, -1))
+      if (NEXT_STAGE && matchKey(ev, NEXT_STAGE)) onSelectRef.current(stepStage(currentRef.current, 1))
+      else if (PREV_STAGE && matchKey(ev, PREV_STAGE)) onSelectRef.current(stepStage(currentRef.current, -1))
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -75,7 +72,7 @@ export function StageAxis({
   const en = lang === 'en'
 
   return (
-    <nav ref={rootRef} className="mw-stage-axis" data-stage-axis="true" aria-label={en ? 'Stages' : '阶段'}>
+    <nav ref={rootRef} className="mw-stage-axis" data-stage-axis="true" data-stage-region="axis" aria-label={en ? 'Stages' : '阶段'}>
       <div className="mw-stage-axis-head">
         <span>{en ? 'Stages' : '阶段'}</span>
         <span className="mw-stage-num">
@@ -87,6 +84,7 @@ export function StageAxis({
           const rows = groups[stage.id] ?? []
           const pending = pendingCount(rows)
           const isCurrent = stage.id === current
+          const label = en ? stage.labelEn : stage.labelZh
           return (
             <li key={stage.id}>
               <button
@@ -96,10 +94,14 @@ export function StageAxis({
                 data-current={isCurrent ? 'true' : 'false'}
                 data-empty={rows.length === 0 ? 'true' : 'false'}
                 aria-current={isCurrent ? 'step' : undefined}
+                // The 9rem axis at 64rem can clip the name; the tooltip carries it in full.
+                title={label}
+                // One Tab stop for the whole axis (desk v8 P2); arrows and j / k move between rows.
+                tabIndex={isCurrent ? 0 : -1}
                 onClick={() => onSelect(stage.id)}
               >
                 <StageDot state={stageDotState(rows)} />
-                <span className="mw-stage-name">{en ? stage.labelEn : stage.labelZh}</span>
+                <span className="mw-stage-name">{label}</span>
                 <span className="mw-stage-pending" data-zero={pending === 0 ? 'true' : 'false'} title={en ? 'Pending' : '待处理'}>
                   {rows.length === 0 ? '—' : pending}
                 </span>
