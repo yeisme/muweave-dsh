@@ -464,7 +464,20 @@ export function WorkbenchMainPage({
           ['blocked', toolGroups.blocked],
         ] as const
       ).map(([group, rows]) =>
-        rows.length === 0 ? null : (
+        rows.length === 0 ? (
+          group === 'ready' ? (
+            // An empty "ready" group is normal when every installed owner capability is paid:
+            // say so, otherwise the panel reads as broken.
+            <section key={group} className="mw-stack" data-gap="xs" data-tool-group={group}>
+              <h4 className="mw-eyebrow">{coreT('catalogReady')}</h4>
+              <p className="mw-dsh-muted" data-tool-empty-hint="ready">
+                {lang === 'en'
+                  ? 'Every installed owner capability needs approval; start from the approval group.'
+                  : '当前安装的 owner 能力都需要审批；先在「需要你批准」里选一项。'}
+              </p>
+            </section>
+          ) : null
+        ) : (
           <section key={group} className="mw-stack" data-gap="xs" data-tool-group={group}>
             <h4 className="mw-eyebrow">
               {coreT(group === 'ready' ? 'catalogReady' : group === 'needsApproval' ? 'catalogNeedsApproval' : 'catalogBlocked')}
