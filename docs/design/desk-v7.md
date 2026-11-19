@@ -236,3 +236,50 @@ v7 由三条并行 lane（Codex `gpt-6.2-sol`，herdr 面板）+ 我做的布局
 | `pnpm typecheck` | 通过 |
 | `pnpm test` | **117/117**（16 文件） |
 | `pnpm build` / `pack:plugins` | 通过 |
+
+## 11. 工具目录接线（11-19 17:xx）
+
+「集成我的各种工具」的最后一公里：`tool-catalog.ts` / `tool-run-card.tsx` 写了很久，但**没有任何组件渲染它们**——和之前「tilt 零消费方」是同一类问题。
+
+### 发现的两处死代码
+
+- `DramaSessionView`（`session-view.tsx`）：只被 `index.tsx` 导出，**没有任何组件挂载**。
+- `ToolRunCard`：同样零引用。
+
+所以工具目录不能挂在 session-view（用户永远看不到），改挂到 **workbench 右检查器的默认态**（未选中元件时不再留空）。
+
+### 接线
+
+- `toolCatalogIntent(entry)` 决定点击行为：`ready` → 开生成台；`needs-approval` → **同样只开生成台**（审批在那边做，目录绝不提交）；`blocked` → 禁用并显示原因。
+- 每行：能力名（左）+ owner（右）+ 阻塞原因（另起一行）。修复了 `mw-sv-tool` 无样式导致文字挤在一起的问题。
+
+### 实测：10 个能力的真实状态
+
+| 状态 | 数量 | 说明 |
+| --- | --- | --- |
+| Ready | 0 | 所有已装 owner 能力都是付费能力，按设计归入审批组 |
+| Needs your approval | 2 | eikona 出图、sonora 音效 |
+| Unavailable | 8 | `NO_COST_CAP`×4、`ADAPTER_PENDING`×3、`NO_SUBMIT_COMMAND`×1、`OWNER_NOT_INSTALLED`×2 |
+
+**8 个不可用不是缺陷，是安全边界**：`capabilities/blocked.ts` 写明这些 owner CLI 缺少费用上限或幂等键——例如 `scaena draw run` 有 `--confirm` 但没有 cost cap 和幂等键，`anatomia analysis start` 三者都缺。付费生成缺这两样，重复调用会造成真实损失，不能为了「看起来能用」而放开。
+
+### 空组提示
+
+`Ready 0` 读起来像坏了。改为空组仍显示标题 + 一句解释（「当前安装的 owner 能力都需要审批；先在『需要你批准』里选一项」）。按语言内联，不新增字典键——workbench 的 `coreT` 是收窄的键联合类型，加键要改类型系统，不值得。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `pnpm typecheck` | 通过 |
+| `pnpm test` | **127/127**（18 文件） |
+| 静态守卫 | 11/11（新增样式用了未声明的 `--mw-line-soft`/`--mw-fs-xs`，被守卫拦住后改用 `--mw-line` + rem） |
+| `pnpm test:integration` | **passed=true**（`20261119091725391-muweave-dsh-80fd66b0`） |
+| 实机 | 右栏 10 个能力，Ready 0 + 解释、Needs approval 2、Unavailable 8 |
+
+### 后续安排（按价值排序）
+
+1. **删掉两处死代码**（`DramaSessionView`、`ToolRunCard`）或给它们接线——现在它们只是增加维护面。
+2. **`ToolRunCard` 接进生成台的任务列表**：任务运行时的可视化目前只有 `ProgressStrip`，缺单任务卡片。
+3. **解除 `NO_COST_CAP` 的前提是给 owner CLI 加 `--max-cost-usd` 与 `--idempotency-key`**——这是 owner 侧工作，不在本套件范围内，但可以在 blocked 原因里给出链接式提示（「需要 owner 支持费用上限」）。
+4. `⌘` 键位平台化显示。
