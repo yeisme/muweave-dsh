@@ -367,6 +367,12 @@ export const MUWEAVE_CORE_CSS = `
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* When the second pane is a compare pane, give the working side more room: an even split squeezes
+   the stage headline into three wrapped lines. */
+.mw-dsh-stage-split[data-split="horizontal"]:has(> .mw-dsh-compare-pane) {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
 .mw-dsh-stage-split[data-split="vertical"] {
   grid-template-rows: auto auto;
 }
@@ -3596,9 +3602,16 @@ body[data-ds-dark-theme] .mw-ambient > i {
 
 .mw-stage-work-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.75rem;
+  gap: 0.25rem 0.75rem;
   min-height: 2.5rem;
+}
+
+/* Keep the counts on one line: wrapping them mid-phrase is what made the head look broken at
+   compare width (stage minus axis minus the pinned pane). */
+.mw-stage-work-head > * {
+  flex: 0 0 auto;
 }
 
 .mw-stage-work-head h2 {
@@ -4010,6 +4023,214 @@ body[data-ds-dark-theme] .mw-ambient > i {
 @media (prefers-reduced-motion: reduce) {
   .mw-stage-row,
   .mw-stage-queue-row {
+    transition: none;
+  }
+}
+
+/* ---------- Compare pane (desk v8 P1) ---------- */
+
+/* The pane brings its own one-line head (label, summary, close), so the shell's card chrome and
+   head step aside while it leads: a hairline divides the two columns, no fill, no shadow. */
+.mw-dsh-compare-pane:has(> .mw-compare) {
+  padding: 0 0 0 var(--mw-s-3);
+  border-radius: 0;
+  border-inline-start: 1px solid var(--mw-line);
+  background: transparent;
+}
+
+.mw-dsh-stage-split[data-split="vertical"] > .mw-dsh-compare-pane:has(> .mw-compare) {
+  padding: var(--mw-s-3) 0 0;
+  border-inline-start: 0;
+  border-top: 1px solid var(--mw-line);
+}
+
+.mw-dsh-compare-pane:has(> .mw-compare) > .mw-spread {
+  display: none;
+}
+
+.mw-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.mw-compare-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2rem;
+  border-bottom: 1px solid var(--mw-line);
+}
+
+.mw-compare-label {
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--mw-label-2);
+}
+
+.mw-compare-badges {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mw-compare-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 1.375rem;
+  padding: 0 0.5rem;
+  border-radius: var(--mw-r-pill);
+  background: color-mix(in oklch, var(--mw-tone) 10%, transparent);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--mw-tone);
+}
+
+.mw-compare-badge[data-tone="neutral"] {
+  color: var(--mw-label-2);
+}
+
+.mw-compare-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--mw-r-1);
+  background: transparent;
+  color: var(--mw-label-2);
+  cursor: pointer;
+  transition: background-color var(--mw-dur-fast) var(--mw-ease), color var(--mw-dur-fast) var(--mw-ease);
+}
+
+.mw-compare-close:hover {
+  background: var(--mw-fill-1);
+  color: var(--mw-label);
+}
+
+.mw-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.mw-compare-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--mw-line);
+  border-radius: var(--mw-r-2);
+  overflow: hidden;
+}
+
+/* Same column width on both sides, same ratio and cap as L1: the two images are directly comparable. */
+.mw-stage-thumb[data-shape="compare"] {
+  aspect-ratio: 16 / 9;
+  max-height: 11rem;
+}
+
+.mw-compare-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  padding: 0.5rem 0.625rem 0.625rem;
+  border-top: 1px solid var(--mw-line);
+  font-size: 0.75rem;
+}
+
+.mw-compare-role {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--mw-label-2);
+}
+
+.mw-compare-role b {
+  font-weight: 600;
+  color: var(--mw-label);
+}
+
+.mw-compare-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--mw-label);
+}
+
+.mw-compare-time {
+  color: var(--mw-label-3);
+}
+
+.mw-compare-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 1.5rem 1rem;
+  border: 1px dashed var(--mw-line-strong);
+  border-radius: var(--mw-r-2);
+  font-size: 0.8125rem;
+  color: var(--mw-label-2);
+}
+
+/* Variant band corner pin: appears on hover or keyboard focus; always shown without a hover pointer. */
+.mw-stage-variant-cell {
+  position: relative;
+}
+
+.mw-compare-pin {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--mw-r-1);
+  background: var(--mw-surface);
+  box-shadow: 0 0 0 1px var(--mw-line);
+  color: var(--mw-label-2);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--mw-dur-fast) var(--mw-ease);
+}
+
+.mw-stage-variant-cell:hover .mw-compare-pin,
+.mw-compare-pin:focus-visible {
+  opacity: 1;
+}
+
+.mw-compare-pin:hover {
+  color: var(--mw-label);
+}
+
+@media (hover: none) {
+  .mw-compare-pin {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mw-compare-close,
+  .mw-compare-pin {
     transition: none;
   }
 }

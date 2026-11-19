@@ -123,3 +123,96 @@ export function shortTime(iso: string | undefined): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+
+/** The N in a "vN" or "vN·x" label; undefined for a shortened digest or no label (never guessed). */
+export function versionNumber(label: string | undefined): number | undefined {
+  const m = label?.trim().match(/^v(\d+)(?:·|$)/i)
+  return m ? Number(m[1]) : undefined
+}
+
+export interface CompareSide {
+  version?: string
+  digest?: string
+  updatedAt?: string
+}
+
+export interface CompareSummary {
+  /** Where the compared side `b` sits relative to the current side `a`. */
+  versionDiff: 'same' | 'older' | 'newer' | 'unknown'
+  /** |a − b| in versions; present only when both sides carry a numeric version. */
+  versionsApart?: number
+  /** 'unknown' when either side has no digest: absent data is not "different". */
+  digestDiff: 'same' | 'different' | 'unknown'
+  hoursApart?: number
+}
+
+/**
+ * Desk v8 P1 §2.2: the three facts the data can back — version order, digest equality, time gap.
+ * Never a quality verdict; there is no score to base one on.
+ */
+export function compareSummary(a: CompareSide | undefined, b: CompareSide | undefined): CompareSummary {
+  const va = versionNumber(a?.version)
+  const vb = versionNumber(b?.version)
+  const versionDiff = va === undefined || vb === undefined ? 'unknown' : vb === va ? 'same' : vb < va ? 'older' : 'newer'
+  const da = a?.digest?.trim()
+  const db = b?.digest?.trim()
+  const digestDiff = !da || !db ? 'unknown' : da === db ? 'same' : 'different'
+  const ta = a?.updatedAt ? Date.parse(a.updatedAt) : Number.NaN
+  const tb = b?.updatedAt ? Date.parse(b.updatedAt) : Number.NaN
+  const out: CompareSummary = { versionDiff, digestDiff }
+  if (va !== undefined && vb !== undefined) out.versionsApart = Math.abs(va - vb)
+  if (Number.isFinite(ta) && Number.isFinite(tb)) out.hoursApart = Math.round(Math.abs(ta - tb) / 3_600_000)
+  return out
+}
+
+/** First image blob of an element: the only honest cover; undefined when the owner ships none. */
+export function coverDigest(el: Pick<MuweaveElementSummaryV1, 'mediaBlobs'> | undefined): string | undefined {
+  const blobs = Array.isArray(el?.mediaBlobs) ? el.mediaBlobs : []
+  return blobs.find((b) => typeof b?.mimeType === 'string' && b.mimeType.startsWith('image/') && b.blobDigest)?.blobDigest
+}
+
+/** One side of the compare pane, as plain data (the pane renders it; nothing is pinned as markup). */
+export interface CompareSubject extends CompareSide {
+  /** Stable identity: element id, or job id + slot id for a variant. */
+  key: string
+  kind: 'element' | 'variant'
+  title: string
+  owner: string
+  /** Image digest for the thumbnail; absent means placeholder. */
+  sha256?: string
+}
+
+/**
+ * An element as a compare side. `basis: 'media'` compares the cover bytes (needed against a variant
+ * slot, whose sha256 is image bytes, not an element digest); the default compares element digests.
+ */
+export function elementSubject(el: MuweaveElementSummaryV1, basis: 'element' | 'media' = 'element'): CompareSubject {
+  const cover = coverDigest(el)
+  return {
+    key: el.elementId,
+    kind: 'element',
+    title: el.title ?? el.elementId,
+    owner: String(el.sourceOwner ?? ''),
+    version: versionLabel(el),
+    digest: basis === 'media' ? cover : el.digest,
+    updatedAt: el.updatedAt,
+    sha256: cover,
+  }
+}
+
+/** A variant slot as a compare side; its tag ("v3·b") doubles as the version label. */
+export function variantSubject(job: JobRecordV1, slot: JobSlotV1, version: string | undefined): CompareSubject {
+  const letter = String.fromCharCode(97 + (slot.index % 26))
+  const tag = version ? `${version}·${letter}` : letter
+  const isImage = typeof slot.mime === 'string' && slot.mime.startsWith('image/')
+  return {
+    key: `${job.jobId}/${slot.slotId}`,
+    kind: 'variant',
+    title: slot.label ? `${tag} · ${slot.label}` : `${tag} · ${job.title}`,
+    owner: String(job.owner ?? ''),
+    version: tag,
+    digest: slot.sha256,
+    updatedAt: job.updatedAt,
+    sha256: isImage ? slot.sha256 : undefined,
+  }
+}

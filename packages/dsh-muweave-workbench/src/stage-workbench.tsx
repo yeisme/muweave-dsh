@@ -4,12 +4,13 @@
  * an honest placeholder when the bundle has no cover, slots or revision; nothing is invented.
  */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   EmptyState,
   Icon,
   StatusTag,
   formatKeyHint,
+  getActiveTheaterRoomId,
   statusLabel,
   useMediaUrl,
   type JobRecordV1,
@@ -17,15 +18,46 @@ import {
   type MuweaveElementSummaryV1,
   type MuweaveRpcClient,
 } from '@yeisme/dsh-muweave-core/client'
-import { isPending, jobForElement, pickPrimary, shortTime, stageLabel, variantSlots, versionLabel, type StageId } from './stage-map'
+import {
+  coverDigest,
+  elementSubject,
+  isPending,
+  jobForElement,
+  pickPrimary,
+  shortTime,
+  stageLabel,
+  variantSlots,
+  variantSubject,
+  versionLabel,
+  type CompareSubject,
+  type StageId,
+} from './stage-map'
 
-function coverDigest(el: MuweaveElementSummaryV1): string | undefined {
-  const blobs = Array.isArray(el.mediaBlobs) ? el.mediaBlobs : []
-  return blobs.find((b) => typeof b?.mimeType === 'string' && b.mimeType.startsWith('image/') && b.blobDigest)?.blobDigest
+const OVERVIEW_ROOM_ID = 'muweave-workbench'
+
+/** Pins a compare side; `trigger` is where focus returns when the compare pane closes. */
+export type PinCompareHandler = (subject: CompareSubject, trigger?: HTMLElement | null) => void
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
 }
 
 /** Thumbnail with a real image when the media route resolves, else the fill + hairline grid placeholder. */
-function StageThumb({ rpc, sha256, alt, shape, children }: { rpc: MuweaveRpcClient; sha256?: string; alt: string; shape: 'wide' | 'variant'; children?: ReactNode }) {
+export function StageThumb({
+  rpc,
+  sha256,
+  alt,
+  shape,
+  children,
+}: {
+  rpc: MuweaveRpcClient
+  sha256?: string
+  alt: string
+  shape: 'wide' | 'variant' | 'compare'
+  children?: ReactNode
+}) {
   const url = useMediaUrl(rpc, sha256)
   return (
     <div className="mw-stage-thumb" data-shape={shape} data-empty={url ? 'false' : 'true'}>
@@ -55,7 +87,21 @@ function useJobs(rpc: MuweaveRpcClient): JobRecordV1[] {
   return jobs
 }
 
-function VariantBand({ rpc, job, slots, version, lang }: { rpc: MuweaveRpcClient; job: JobRecordV1; slots: JobSlotV1[]; version?: string; lang: string }) {
+function VariantBand({
+  rpc,
+  job,
+  slots,
+  version,
+  lang,
+  onPinVariant,
+}: {
+  rpc: MuweaveRpcClient
+  job: JobRecordV1
+  slots: JobSlotV1[]
+  version?: string
+  lang: string
+  onPinVariant?: PinCompareHandler
+}) {
   const accepted = slots.find((s) => s.review === 'accepted')?.slotId
   const [chosen, setChosen] = useState<string | undefined>(accepted)
   const en = lang === 'en'
@@ -72,7 +118,7 @@ function VariantBand({ rpc, job, slots, version, lang }: { rpc: MuweaveRpcClient
           const tag = version ? `${version}·${letter}` : letter
           const isImage = typeof slot.mime === 'string' && slot.mime.startsWith('image/')
           return (
-            <li key={slot.slotId}>
+            <li key={slot.slotId} className="mw-stage-variant-cell">
               <button
                 type="button"
                 className="mw-stage-variant"
@@ -88,6 +134,21 @@ function VariantBand({ rpc, job, slots, version, lang }: { rpc: MuweaveRpcClient
                   {slot.review === 'accepted' ? (en ? 'Accepted' : '已采用') : slot.label ?? statusLabel(slot.status, lang)}
                 </span>
               </button>
+              {onPinVariant ? (
+                <button
+                  type="button"
+                  className="mw-compare-pin"
+                  data-compare-pin="true"
+                  aria-label={en ? `Compare ${tag}` : `并排对比 ${tag}`}
+                  title={en ? 'Compare side by side' : '并排对比'}
+                  onClick={(ev) => {
+                    setChosen(slot.slotId)
+                    onPinVariant(variantSubject(job, slot, version), ev.currentTarget)
+                  }}
+                >
+                  <Icon name="pin" />
+                </button>
+              ) : null}
             </li>
           )
         })}
@@ -127,6 +188,7 @@ export function StageWorkbench({
   selectedId,
   onSelect,
   onPinCompare,
+  onPinVariant,
 }: {
   rpc: MuweaveRpcClient
   stage: StageId
@@ -134,9 +196,13 @@ export function StageWorkbench({
   lang: string
   selectedId?: string
   onSelect: (elementId: string) => void
-  onPinCompare: (node: ReactNode) => void
+  onPinCompare: PinCompareHandler
+  /** Variant band corner pin; the caller also switches the layout to compare. Absent hides the pins. */
+  onPinVariant?: PinCompareHandler
 }) {
   const jobs = useJobs(rpc)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const baselineBtnRef = useRef<HTMLButtonElement | null>(null)
   const en = lang === 'en'
   const primary = pickPrimary(rows, selectedId)
   const pending = rows.filter(isPending)
@@ -145,17 +211,27 @@ export function StageWorkbench({
   const slots = variantSlots(job)
   const version = versionLabel(primary)
 
-  const pinBaseline = (el: MuweaveElementSummaryV1) =>
-    onPinCompare(
-      <div className="mw-stack" data-gap="xs">
-        <span className="mw-title">{el.title}</span>
-        <span className="mw-dsh-muted">
-          {el.sourceOwner} · {el.kind} · {el.sourceRef}
-          {version ? ` · ${version}` : ''}
-        </span>
-        <code className="mw-dsh-code">{el.digest}</code>
-      </div>,
-    )
+  const pinBaseline = (el: MuweaveElementSummaryV1, trigger?: HTMLElement | null) => onPinCompare(elementSubject(el), trigger)
+
+  // Design §4: c = 「对比基线」 on the L1 primary, as if the button were pressed (focus returns there).
+  const pinRef = useRef<() => void>(() => undefined)
+  pinRef.current = () => {
+    if (primary) pinBaseline(primary, baselineBtnRef.current)
+  }
+  useEffect(() => {
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key !== 'c' || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return
+      if (ev.defaultPrevented || ev.isComposing || isEditableTarget(ev.target)) return
+      if (ev.target instanceof Element && ev.target.closest('[role="dialog"], [role="menu"]')) return
+      const room = getActiveTheaterRoomId()
+      if (room && room !== OVERVIEW_ROOM_ID) return
+      if (!rootRef.current?.isConnected) return
+      ev.preventDefault()
+      pinRef.current()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   const head = (
     <header className="mw-stage-work-head">
@@ -179,7 +255,7 @@ export function StageWorkbench({
 
   if (!primary) {
     return (
-      <div className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
+      <div ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
         {head}
         <EmptyState>
           {stage === 'sound'
@@ -197,7 +273,7 @@ export function StageWorkbench({
   const cover = coverDigest(primary)
 
   return (
-    <div className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
+    <div ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
       {head}
       <div className="mw-stage-top">
         <section className="mw-stage-level" data-level="L1">
@@ -214,7 +290,15 @@ export function StageWorkbench({
                 <button type="button" className="mw-dsh-btn" data-variant="primary" data-size="sm" onClick={() => onSelect(primary.elementId)}>
                   {en ? 'Review' : '审阅'}
                 </button>
-                <button type="button" className="mw-dsh-btn" data-size="sm" onClick={() => pinBaseline(primary)}>
+                <button
+                  ref={baselineBtnRef}
+                  type="button"
+                  className="mw-dsh-btn"
+                  data-size="sm"
+                  aria-keyshortcuts="c"
+                  title={`${en ? 'Compare baseline' : '对比基线'} (${formatKeyHint('c')})`}
+                  onClick={(ev) => pinBaseline(primary, ev.currentTarget)}
+                >
                   {en ? 'Compare baseline' : '对比基线'}
                 </button>
               </span>
@@ -226,7 +310,7 @@ export function StageWorkbench({
           </article>
         </section>
         <div className="mw-stage-side">
-          {slots.length > 1 && job ? <VariantBand key={job.jobId} rpc={rpc} job={job} slots={slots} version={version} lang={lang} /> : null}
+          {slots.length > 1 && job ? <VariantBand key={job.jobId} rpc={rpc} job={job} slots={slots} version={version} lang={lang} onPinVariant={onPinVariant} /> : null}
           <dl className="mw-stage-kv">
             <div>
               <dt>owner</dt>
@@ -301,7 +385,7 @@ export function StageWorkbench({
           </span>
         ) : null}
         <span className="mw-stage-versions-end">
-          <button type="button" className="mw-dsh-btn" data-size="sm" onClick={() => pinBaseline(primary)}>
+          <button type="button" className="mw-dsh-btn" data-size="sm" onClick={(ev) => pinBaseline(primary, ev.currentTarget)}>
             {en ? 'Side by side' : '并排对比'}
           </button>
         </span>

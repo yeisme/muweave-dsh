@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   CompanionList,
   CoverCollage,
@@ -37,7 +37,8 @@ import {
 import { ProjectPanel, type ProjectRow } from './project-panel'
 import { StageAxis } from './stage-axis'
 import { StageWorkbench } from './stage-workbench'
-import { defaultStage, groupByStage, type StageId } from './stage-map'
+import { ComparePaneSlot } from './compare-pane'
+import { defaultStage, elementSubject, groupByStage, pickPrimary, type CompareSubject, type StageId } from './stage-map'
 import { toolCatalogIntent, useToolCatalog, type ToolCatalogEntry } from '@yeisme/dsh-muweave-core/client'
 
 export const name = '@yeisme/dsh-muweave-workbench'
@@ -212,6 +213,12 @@ export function WorkbenchMainPage({
   const [pickedStage, setPickedStage] = useState<StageId | undefined>(undefined)
   const lang = coreT('langCode')
   const covers = useProjectCovers(rpc, 3)
+  /** Desk v8 P1: the pinned compare side as data; the shell slot only holds a bound <ComparePaneSlot />. */
+  const [compareTarget, setCompareTarget] = useState<CompareSubject | null>(null)
+  /** True while the compare pane is on screen: the inspector steps aside so both columns are equal. */
+  const [compareShown, setCompareShown] = useState(false)
+  /** Where focus returns when the compare pane closes. */
+  const compareTriggerRef = useRef<HTMLElement | null>(null)
 
   const loadList = useCallback(async () => {
     const res = await rpc.call<{
@@ -293,6 +300,35 @@ export function WorkbenchMainPage({
     await loadList()
   }
 
+  /** Builds the compare pane's props from the current stage selection plus one pinned subject. */
+  const comparePaneProps = (pinned: CompareSubject | null) => {
+    const el = elements.find((e) => e.elementId === selectedId) ?? pickPrimary(stageGroups[currentStage], selectedId)
+    return {
+      rpc,
+      lang,
+      current: el ? elementSubject(el, pinned?.kind === 'variant' ? 'media' : 'element') : undefined,
+      compare: pinned ?? undefined,
+      onClose: closeCompare,
+      onMountedChange: setCompareShown,
+    }
+  }
+
+  /**
+   * Pins a compare side. The shell's onPinCompare already opens the horizontal split; hiding the
+   * inspector while the pane is shown completes the 「对比」 preset without touching the shell.
+   */
+  const pinCompare = (shellPin: (node: ReactNode) => void, subject: CompareSubject, trigger?: HTMLElement | null) => {
+    compareTriggerRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    setCompareTarget(subject)
+    shellPin(<ComparePaneSlot {...comparePaneProps(subject)} />)
+  }
+  const closeCompare = useCallback(() => {
+    setCompareTarget(null)
+    const trigger = compareTriggerRef.current
+    compareTriggerRef.current = null
+    if (trigger?.isConnected) trigger.focus()
+  }, [])
+
   const renderElementCards = (
     items: readonly MuweaveElementSummaryV1[],
     onPinCompare: (node: ReactNode) => void,
@@ -339,17 +375,7 @@ export function WorkbenchMainPage({
                   icon="pin"
                   size="sm"
                   label={coreT('openCompareB')}
-                  onClick={() =>
-                    onPinCompare(
-                      <div className="mw-stack" data-gap="xs">
-                        <span className="mw-title">{el.title}</span>
-                        <span className="mw-dsh-muted">
-                          {el.sourceOwner} · {el.kind} · {el.sourceRef}
-                        </span>
-                        <code className="mw-dsh-code">{el.digest}</code>
-                      </div>,
-                    )
-                  }
+                  onClick={() => pinCompare(onPinCompare, elementSubject(el))}
                 />
                 <IconButton
                   icon="at"
@@ -398,7 +424,8 @@ export function WorkbenchMainPage({
             lang={lang}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            onPinCompare={onPinCompare}
+            onPinCompare={(subject, trigger) => pinCompare(onPinCompare, subject, trigger)}
+            onPinVariant={(subject, trigger) => pinCompare(onPinCompare, subject, trigger)}
           />
         </div>
       </div>
@@ -579,100 +606,113 @@ export function WorkbenchMainPage({
         }
       : null
 
+  // The live current side: the selected element, else this stage's L1 primary. Against a variant the
+  // comparable digest is the cover image, so the media basis is used (slot sha256 is image bytes).
+  const currentElement = elements.find((e) => e.elementId === selectedId) ?? pickPrimary(stageGroups[currentStage], selectedId)
+  const compareValue = {
+    rpc,
+    lang,
+    current: currentElement ? elementSubject(currentElement, compareTarget?.kind === 'variant' ? 'media' : 'element') : undefined,
+    compare: compareTarget ?? undefined,
+    onClose: closeCompare,
+    onMountedChange: setCompareShown,
+  }
+
   return (
     <WorkspaceShell
-      title={t('panelTitle')}
-      rpc={rpc}
-      t={coreT}
-      rightInspector={rightInspector}
-      onSyncRequested={loadList}
-      notice={notice ?? projectNotice}
-      onDismissNotice={() => setNotice(null)}
-      leftTree={leftTree}
-      projectBar={
-        <ProjectPanel rpc={rpc} t={coreT} activeProjectId={activeProject?.id} onActivate={setActiveProject} />
-      }
-      hero={
-        <RoomHero
-          eyebrow={t('heroEyebrow')}
-          title={t('heroTitle')}
-          lede={
-            <>
-              {ledeBefore}
-              {firstCover ? <img className="mw-inline-thumb" src={firstCover.url} alt="" /> : null}
-              {ledeAfter}
-            </>
-          }
-          stats={[
-            { icon: 'inbox', value: elements.length, label: t('metricTotal') },
-            { icon: 'spark', value: piItems.length, label: t('tabPiArtifacts') },
-            { icon: 'panelLeft', value: dshItems.length, label: t('tabDshArtifacts') },
-            { icon: 'warn', value: staleCount, label: t('metricStale') },
-          ]}
-          cover={<CoverCollage covers={covers} posterTitle={t('heroTitle')} posterMeta="MuWeave" />}
-        />
-      }
-      stageTabs={[
-        {
-          id: 'overview',
-          label: () => t('tabOverview'),
-          render: ({ onPinCompare }) => renderOverview(onPinCompare),
-        },
-        {
-          id: 'pi-artifacts',
-          label: () => t('tabPiArtifacts'),
-          render: ({ onPinCompare }) => renderElementCards(piItems, onPinCompare),
-        },
-        {
-          id: 'dsh-artifacts',
-          label: () => t('tabDshArtifacts'),
-          render: ({ onPinCompare }) => renderElementCards(dshItems, onPinCompare),
-        },
-        {
-          id: 'bind-wizard',
-          label: () => t('tabBindWizard'),
-          render: () => (
-            <form
-              className="mw-dsh-card mw-stack"
-              data-flat="true"
-              onSubmit={(e) => {
-                e.preventDefault()
-                void handleBindSubmit()
-              }}
-            >
-              <SectionHead title={t('tabBindWizard')} meta={t('bindHint')} />
-              <div className="mw-form-grid">
-                <label className="mw-field">
-                  <span>{t('bindTargetLabel')}</span>
-                  <select className="mw-input" value={bindTarget} onChange={(e) => setBindTarget(e.target.value)}>
-                    {BIND_TARGETS.map((bt) => (
-                      <option key={bt.value} value={bt.value}>
-                        {bt.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="mw-field">
-                  <span>{t('bindRefLabel')}</span>
-                  <input
-                    className="mw-input"
-                    type="text"
-                    placeholder={t('bindRefPlaceholder')}
-                    value={bindRef}
-                    onChange={(e) => setBindRef(e.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="mw-row">
-                <button type="submit" className="mw-dsh-btn" data-variant="primary" disabled={!bindRef.trim()}>
-                  {t('bindSubmit')}
-                </button>
-              </div>
-            </form>
-          ),
-        },
-      ]}
-    />
+        title={t('panelTitle')}
+        rpc={rpc}
+        t={coreT}
+        rightInspector={compareShown ? undefined : rightInspector}
+        onSyncRequested={loadList}
+        notice={notice ?? projectNotice}
+        onDismissNotice={() => setNotice(null)}
+        leftTree={leftTree}
+        projectBar={
+          <ProjectPanel rpc={rpc} t={coreT} activeProjectId={activeProject?.id} onActivate={setActiveProject} />
+        }
+        hero={
+          <RoomHero
+            eyebrow={t('heroEyebrow')}
+            title={t('heroTitle')}
+            lede={
+              <>
+                {ledeBefore}
+                {firstCover ? <img className="mw-inline-thumb" src={firstCover.url} alt="" /> : null}
+                {ledeAfter}
+              </>
+            }
+            stats={[
+              { icon: 'inbox', value: elements.length, label: t('metricTotal') },
+              { icon: 'spark', value: piItems.length, label: t('tabPiArtifacts') },
+              { icon: 'panelLeft', value: dshItems.length, label: t('tabDshArtifacts') },
+              { icon: 'warn', value: staleCount, label: t('metricStale') },
+            ]}
+            cover={<CoverCollage covers={covers} posterTitle={t('heroTitle')} posterMeta="MuWeave" />}
+          />
+        }
+        stageTabs={[
+          {
+            id: 'overview',
+            label: () => t('tabOverview'),
+            render: ({ onPinCompare }) => renderOverview(onPinCompare),
+          },
+          {
+            id: 'pi-artifacts',
+            label: () => t('tabPiArtifacts'),
+            render: ({ onPinCompare }) => renderElementCards(piItems, onPinCompare),
+          },
+          {
+            id: 'dsh-artifacts',
+            label: () => t('tabDshArtifacts'),
+            render: ({ onPinCompare }) => renderElementCards(dshItems, onPinCompare),
+          },
+          {
+            id: 'bind-wizard',
+            label: () => t('tabBindWizard'),
+            render: () => (
+              <form
+                className="mw-dsh-card mw-stack"
+                data-flat="true"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void handleBindSubmit()
+                }}
+              >
+                <SectionHead title={t('tabBindWizard')} meta={t('bindHint')} />
+                <div className="mw-form-grid">
+                  <label className="mw-field">
+                    <span>{t('bindTargetLabel')}</span>
+                    <select className="mw-input" value={bindTarget} onChange={(e) => setBindTarget(e.target.value)}>
+                      {BIND_TARGETS.map((bt) => (
+                        <option key={bt.value} value={bt.value}>
+                          {bt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="mw-field">
+                    <span>{t('bindRefLabel')}</span>
+                    <input
+                      className="mw-input"
+                      type="text"
+                      placeholder={t('bindRefPlaceholder')}
+                      value={bindRef}
+                      onChange={(e) => setBindRef(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="mw-row">
+                  <button type="submit" className="mw-dsh-btn" data-variant="primary" disabled={!bindRef.trim()}>
+                    {t('bindSubmit')}
+                  </button>
+                </div>
+              </form>
+            ),
+          },
+        ]}
+      />
+    
   )
 }
 
