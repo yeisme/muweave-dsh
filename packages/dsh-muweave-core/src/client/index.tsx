@@ -609,4 +609,12 @@ export { ShotGenerateButton, ShotMedia, keyframeDigest, shotDescription, type Li
 export { ElementChip, SkillChip, FileChip, GenerateChip } from './composer-chips'
 export { COMPOSER_ACTIONS, composerActionDisabledReason } from './composer-actions'
 export { ToolRunCard } from './tool-run-card'
-export { useToolCatalog, groupToolCatalog, toolOwnerLabel } from './tool-catalog'
+export {
+  useToolCatalog,
+  groupToolCatalog,
+  toolOwnerLabel,
+  toolCatalogIntent,
+  type ToolCatalogEntry,
+  type ToolCatalogGroups,
+  type ToolCatalogIntent,
+} from './tool-catalog'

@@ -23,6 +23,23 @@ export interface ToolCatalogEntry {
   availability: ToolAvailability; blockedReason?: string; costHint?: string
   inputs: CapabilityDescriptorV1['inputs']; opensRoom?: string; opensGeneration?: boolean; summaryZh?: string; summaryEn?: string
 }
+/**
+ * What clicking a catalog row does. Paid capabilities only ever *open* the generation desk where the
+ * user approves — the catalog never submits or approves on its own.
+ */
+export type ToolCatalogIntent =
+  | { kind: 'generate' } // open the generation desk prefilled with this capability
+  | { kind: 'approve' } // open the desk focused on the approval step
+  | { kind: 'blocked'; reason: string }
+
+export function toolCatalogIntent(entry: ToolCatalogEntry): ToolCatalogIntent {
+  if (entry.availability === 'blocked') {
+    return { kind: 'blocked', reason: entry.blockedReason ?? TOOL_DICT_ZH.catalogBlocked }
+  }
+  if (entry.availability === 'needs-approval') return { kind: 'approve' }
+  return { kind: 'generate' }
+}
+
 export interface ToolCatalogGroups { ready: ToolCatalogEntry[]; needsApproval: ToolCatalogEntry[]; blocked: ToolCatalogEntry[] }
 
 const EN_LABELS: Record<string, string> = {

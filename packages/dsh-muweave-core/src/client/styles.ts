@@ -2790,6 +2790,39 @@ body[data-ds-dark-theme] .mw-ambient > i {
   transform: translateY(0);
 }
 
+/* Tool catalog rows: name on the left, owner and the blocking reason on the right. */
+.mw-sv-tool {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--mw-s-2);
+  padding-block: var(--mw-s-1);
+  border-block-end: 1px solid var(--mw-line);
+}
+
+.mw-sv-tool:last-child {
+  border-block-end: none;
+}
+
+.mw-sv-tool > .mw-dsh-btn {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  text-align: start;
+  min-width: 0;
+}
+
+.mw-sv-tool > .mw-dsh-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mw-sv-tool > .mw-dsh-muted {
+  flex: 0 0 auto;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
 /* Composer action bar: one row that scrolls, never a two-row block that eats the stage. */
 [data-composer-actions="true"] {
   display: flex;

@@ -34,6 +34,7 @@ import {
   type OwnerReadinessState,
 } from '@yeisme/dsh-muweave-core/client'
 import { ProjectPanel, type ProjectRow } from './project-panel'
+import { toolCatalogIntent, useToolCatalog, type ToolCatalogEntry } from '@yeisme/dsh-muweave-core/client'
 
 export const name = '@yeisme/dsh-muweave-workbench'
 export const inject: readonly string[] = ['slots', 'locale', 'sidebarRightTabs']
@@ -419,6 +420,64 @@ export function WorkbenchMainPage({
     </div>
   )
 
+  const toolCatalog = useToolCatalog(rpc)
+  const runTool = (entry: ToolCatalogEntry) => {
+    const intent = toolCatalogIntent(entry)
+    if (intent.kind === 'blocked') return
+    openGeneration({ capabilityId: entry.id })
+  }
+  const toolRow = (entry: ToolCatalogEntry) => {
+    const intent = toolCatalogIntent(entry)
+    return (
+      <li key={entry.id} className="mw-sv-tool" data-tool-id={entry.id} data-availability={entry.availability}>
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-variant="ghost"
+          data-size="sm"
+          data-tool-action={intent.kind}
+          disabled={intent.kind === 'blocked'}
+          title={intent.kind === 'blocked' ? intent.reason : entry.labelZh}
+          onClick={() => runTool(entry)}
+        >
+          <span>{lang === 'en' ? entry.labelEn : entry.labelZh}</span>
+        </button>
+        <span className="mw-dsh-muted">{entry.owner}</span>
+        {intent.kind === 'blocked' ? <span className="mw-dsh-muted">{intent.reason}</span> : null}
+      </li>
+    )
+  }
+  const toolGroups = toolCatalog.groups
+  const toolCatalogPanel = (
+    <div className="mw-stack" data-muweave-tool-catalog="true" data-gap="sm">
+      <span className="mw-eyebrow">{coreT('catalogTitle')}</span>
+      <p className="mw-dsh-muted">
+        {coreT('catalogSummary')
+          .replace('{ready}', String(toolGroups.ready.length))
+          .replace('{approval}', String(toolGroups.needsApproval.length))
+          .replace('{blocked}', String(toolGroups.blocked.length))}
+      </p>
+      {(
+        [
+          ['ready', toolGroups.ready],
+          ['needsApproval', toolGroups.needsApproval],
+          ['blocked', toolGroups.blocked],
+        ] as const
+      ).map(([group, rows]) =>
+        rows.length === 0 ? null : (
+          <section key={group} className="mw-stack" data-gap="xs" data-tool-group={group}>
+            <h4 className="mw-eyebrow">
+              {coreT(group === 'ready' ? 'catalogReady' : group === 'needsApproval' ? 'catalogNeedsApproval' : 'catalogBlocked')}
+            </h4>
+            <ul className="mw-stack" data-gap="xs">
+              {rows.map(toolRow)}
+            </ul>
+          </section>
+        ),
+      )}
+    </div>
+  )
+
   const rightInspector = selectedDetail ? (
     <div className="mw-stack">
       <SectionHead
@@ -443,7 +502,9 @@ export function WorkbenchMainPage({
       <span className="mw-eyebrow">{t('payload')}</span>
       <pre className="mw-pre">{JSON.stringify(selectedDetail.payload, null, 2)}</pre>
     </div>
-  ) : undefined
+  ) : (
+    toolCatalogPanel
+  )
 
   const projectNotice: WorkspaceNotice | null =
     projectUnclaimed && activeProject

@@ -20,7 +20,7 @@ import type { MuweaveRpcClient } from './rpc-client'
 import { elementIdFromRef, readSessionLog, subscribeSessionLog, type SessionLogEntry } from './session-log'
 import { EmptyState, Icon, Segmented, StatusTag } from './ui'
 
-type Section = 'session' | 'shots' | 'script' | 'assets'
+type Section = 'session' | 'shots' | 'script' | 'assets' | 'tools'
 
 const SHOT_LIMIT = 12
 const SCENE_LIMIT = 6
@@ -105,10 +105,14 @@ function LogRow({
     </li>
   )
 }
+import { toolCatalogIntent, useToolCatalog, type ToolCatalogEntry } from './tool-catalog'
+import { openGeneration } from './generation-store'
+
 
 export function DramaSessionView({ rpc, t, sessionId, onOpenTheater }: DramaSessionViewProps) {
   const log = useSessionLog(sessionId)
   const [section, setSection] = useState<Section>('session')
+  const catalog = useToolCatalog(rpc)
   const { digest, loading } = useDramaDigest(rpc)
   const lang = t('langCode')
   const axisLabels: Record<DigestAssetAxis['key'], string> = {
@@ -192,6 +196,64 @@ export function DramaSessionView({ rpc, t, sessionId, onOpenTheater }: DramaSess
       )
   }
 
+  const runTool = (entry: ToolCatalogEntry) => {
+    const intent = toolCatalogIntent(entry)
+    if (intent.kind === 'blocked') return
+    // Both ready and paid capabilities go through the desk: paid ones still need the user's approval
+    // there, and this view never submits on its own.
+    openGeneration({ capabilityId: entry.id })
+  }
+
+  const toolRow = (entry: ToolCatalogEntry) => {
+    const intent = toolCatalogIntent(entry)
+    const label = t('langCode') === 'en' ? entry.labelEn : entry.labelZh
+    return (
+      <li key={entry.id} className="mw-sv-tool" data-tool-id={entry.id} data-availability={entry.availability}>
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-variant="ghost"
+          data-size="sm"
+          data-tool-action={intent.kind}
+          disabled={intent.kind === 'blocked'}
+          title={intent.kind === 'blocked' ? intent.reason : label}
+          onClick={() => runTool(entry)}
+        >
+          <span>{label}</span>
+        </button>
+        <span className="mw-dsh-muted">{entry.owner}</span>
+        {intent.kind === 'blocked' ? <span className="mw-dsh-muted">{intent.reason}</span> : null}
+      </li>
+    )
+  }
+
+  if (section === 'tools') {
+    body = (
+      <div className="mw-stack" data-muweave-tool-catalog="true" data-gap="sm">
+        <p className="mw-dsh-muted">
+          {t('catalogSummary')
+            .replace('{ready}', String(catalog.groups.ready.length))
+            .replace('{approval}', String(catalog.groups.needsApproval.length))
+            .replace('{blocked}', String(catalog.groups.blocked.length))}
+        </p>
+        {(
+          [
+            ['ready', catalog.groups.ready],
+            ['needsApproval', catalog.groups.needsApproval],
+            ['blocked', catalog.groups.blocked],
+          ] as const
+        ).map(([group, rows]) =>
+          rows.length === 0 ? null : (
+            <section key={group} className="mw-stack" data-gap="xs" data-tool-group={group}>
+              <h4 className="mw-eyebrow">{t(group === 'ready' ? 'catalogReady' : group === 'needsApproval' ? 'catalogNeedsApproval' : 'catalogBlocked')}</h4>
+              <ul className="mw-stack" data-gap="xs">{rows.map(toolRow)}</ul>
+            </section>
+          ),
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="mw-session-view" data-muweave-session-view="true">
       <header className="mw-sv-head">
@@ -217,6 +279,7 @@ export function DramaSessionView({ rpc, t, sessionId, onOpenTheater }: DramaSess
           { value: 'shots', label: t('sessionShots') },
           { value: 'script', label: t('sessionScript') },
           { value: 'assets', label: t('sessionAssets') },
+          { value: 'tools', label: t('catalogTitle') },
         ]}
       />
       <div className="mw-sv-body">{body}</div>
