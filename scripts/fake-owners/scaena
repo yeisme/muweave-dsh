@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+// Fake `scaena` for offline e2e: read-only storyboard/asset summaries matching the e2e fixture, so a host
+// re-sync (after a shot-media link) recompiles the storyboard with linkedMedia. No writes, no network.
+import { flag, out, reject } from './_lib.mjs'
+
+const args = process.argv.slice(2)
+const noRemote = args.includes('--no-remote') && args.includes('--json')
+
+if (args[0] === '--version') {
+  process.stdout.write('scaena 0.0.0-fake\n')
+} else if (noRemote && args[0] === 'storyboard' && args[1] === 'table' && args[2] === 'show' && args[3] && flag(args, '--view') === 'summary') {
+  out({
+    schema_version: 'scaena.storyboard_table_view.v1alpha1',
+    episode_ref: 'episode:01',
+    rows: [
+      {
+        scene_ref: 'scene:ep01:s01',
+        shot_ref: 'shot:ep01:s01:01',
+        order: 1,
+        planned_duration_micros: 3500000,
+        cells: { camera: '9:16 竖屏特写推镜', focus: '旧怀表反光' },
+        restricted_fields: ['dialogue_raw'],
+      },
+    ],
+  })
+} else if (noRemote && args[0] === 'asset' && args[1] === 'list') {
+  out({
+    schema_version: 'scaena.asset.list_page.v0.1',
+    total_count: 1,
+    assets: [
+      {
+        asset_ref: 'asset:char:linwu',
+        kind: 'image',
+        role: 'character',
+        status: 'accepted',
+        version: 0,
+        version_ref: 'asset:char:linwu:v1',
+        scaena_admission: 'admitted',
+        subject_freeze: 'frozen',
+        production_acceptance: 'accepted',
+        current_usability: 'ready',
+      },
+    ],
+  })
+} else {
+  reject(`fake scaena does not implement: ${args.slice(0, 3).join(' ')}`)
+}

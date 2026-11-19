@@ -1,0 +1,78 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "baseUrl": ".",
+    "paths": {
+      "@yeisme/muweave-bundle": [
+        "./packages/muweave-bundle/src/index.ts"
+      ],
+      "@yeisme/muweave-bundle/consumer": [
+        "./packages/muweave-bundle/src/consumer.ts"
+      ],
+      "@yeisme/dsh-muweave-core": [
+        "./packages/dsh-muweave-core/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-core/client": [
+        "./packages/dsh-muweave-core/src/client/index.tsx"
+      ],
+      "@yeisme/dsh-muweave-core/protocol": [
+        "./packages/dsh-muweave-core/src/protocol.ts"
+      ],
+      "@yeisme/dsh-muweave-workbench": [
+        "./packages/dsh-muweave-workbench/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-workbench/client": [
+        "./packages/dsh-muweave-workbench/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-eikona": [
+        "./packages/dsh-muweave-eikona/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-eikona/client": [
+        "./packages/dsh-muweave-eikona/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-script": [
+        "./packages/dsh-muweave-script/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-script/client": [
+        "./packages/dsh-muweave-script/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-drama": [
+        "./packages/dsh-muweave-drama/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-drama/client": [
+        "./packages/dsh-muweave-drama/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-kit": [
+        "./packages/dsh-muweave-kit/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-kit/client": [
+        "./packages/dsh-muweave-kit/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-schedule": [
+        "./packages/dsh-muweave-schedule/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-schedule/client": [
+        "./packages/dsh-muweave-schedule/src/client.tsx"
+      ]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*",
+    "tests/**/*"
+  ]
+}

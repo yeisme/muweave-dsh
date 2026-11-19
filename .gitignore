@@ -1,0 +1,17 @@
+node_modules/
+dist/
+lib/
+.work/
+.muweave/cas/
+temp/
+playwright-report/
+test-results/
+*.tsbuildinfo
+*.log
+.DS_Store
+
+# Local agent tooling: per-machine skill copies, not project source.
+.agents/
+.claude/
+.pi-bg/
+.skill-sync.*/

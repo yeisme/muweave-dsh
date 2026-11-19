@@ -1,0 +1,4 @@
+- insert:
+    - id: muweave-script
+      name: '@yeisme/dsh-muweave-script'
+      config: {}

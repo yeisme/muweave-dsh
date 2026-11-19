@@ -1,0 +1,45 @@
+#!/usr/bin/env node
+// Fake `eikona` for offline e2e. Covers exactly the commands the creator-platform adapter issues.
+import { mkdirSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { flag, loadState, out, reject, saveState, sha256Of, tinyPng } from './_lib.mjs'
+
+const args = process.argv.slice(2)
+const [cmd, sub] = args
+
+if (cmd === '--version') {
+  process.stdout.write('eikona 0.0.0-fake\n')
+} else if (cmd === 'generate' && args.includes('--json') && flag(args, '--input') && flag(args, '--count')) {
+  const count = Number(flag(args, '--count'))
+  if (!Number.isInteger(count) || count < 1) reject('bad --count')
+  if (args.includes('--dry-run')) {
+    out({ ok: true, data: { estimated_usd: Number((0.04 * count).toFixed(2)), count } })
+  } else if (['--max-cost-usd', '--approval-cost-usd', '--approve-cost', '--background', '--output-dir'].every((f) => args.includes(f)) && flag(args, '--run-id')) {
+    const runId = flag(args, '--run-id')
+    // The host reads artifacts only from --output-dir; nothing is written under .eikona/.
+    const outDir = flag(args, '--output-dir')
+    mkdirSync(outDir, { recursive: true })
+    const artifacts = []
+    for (let i = 0; i < count; i += 1) {
+      const bytes = tinyPng(i + 1)
+      const file = `art_${i + 1}.png`
+      writeFileSync(path.join(outDir, file), bytes)
+      artifacts.push({ artifact_id: `art_${runId.slice(-6)}_${i + 1}`, sha256: sha256Of(bytes), mime_type: 'image/png', path: file })
+    }
+    saveState('eikona', runId, { count, artifacts })
+    out({ ok: true, data: { run_id: runId, status: 'running' } })
+  } else {
+    reject('generate submit needs the approval flags')
+  }
+} else if (cmd === 'status' && sub && args.includes('--json')) {
+  const state = loadState('eikona', sub)
+  if (!state) reject('unknown run')
+  const artifacts = state.artifacts
+  out({ ok: true, data: { run_id: sub, status: 'done', artifacts, cost: { actual_usd: Number((0.04 * state.count).toFixed(2)) } } })
+} else if (cmd === 'feedback' && (sub === 'accept' || sub === 'reject') && args[2] && flag(args, '--artifact') && args.includes('--json')) {
+  out({ ok: true, data: { run_id: args[2], artifact_id: flag(args, '--artifact'), decision: sub } })
+} else if (cmd === 'cancel' && sub && args.includes('--json')) {
+  out({ ok: true, data: { run_id: sub, status: 'cancelled' } })
+} else {
+  reject(`fake eikona does not implement: ${cmd ?? ''}`)
+}

@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+// Fake `sonora` for offline e2e. Covers the sfx estimate / generate / job get commands the adapter issues.
+import { mkdirSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { flag, loadState, out, reject, saveState, stateFile } from './_lib.mjs'
+
+const args = process.argv.slice(2)
+const [cmd, sub, third] = args
+
+// Smallest valid-looking mp3 frame stream is unnecessary: the host only stores and digests the bytes.
+const AUDIO = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(413, 0x11)])
+
+if (cmd === '--version') {
+  process.stdout.write('sonora 0.0.0-fake\n')
+} else if (cmd === 'sfx' && sub === 'estimate' && flag(args, '--text-file') && args.includes('--json')) {
+  out({ ok: true, data: { estimated_cost_usd: 0.05 } })
+} else if (cmd === 'sfx' && sub === 'generate' && flag(args, '--text-file') && args.includes('--confirm-live') && flag(args, '--idempotency-key') && flag(args, '--max-cost-usd') && args.includes('--json')) {
+  const jobId = `sfx_${createHash('sha256').update(flag(args, '--idempotency-key')).digest('hex').slice(0, 12)}`
+  saveState('sonora', jobId, { ready: true })
+  out({ ok: true, data: { job_id: jobId, status: 'running' } })
+} else if (cmd === 'sfx' && sub === 'job' && third === 'get' && args[3] && args.includes('--json')) {
+  if (!loadState('sonora', args[3])) reject('unknown job')
+  const { dir } = stateFile('sonora', args[3])
+  mkdirSync(dir, { recursive: true })
+  const rel = path.join('fake-sonora-out', `${args[3]}.mp3`)
+  writeFileSync(path.join(process.cwd(), rel), AUDIO)
+  const digest = `sha256:${createHash('sha256').update(AUDIO).digest('hex')}`
+  out({ ok: true, data: { job_id: args[3], status: 'done', output: { path: path.join(process.cwd(), rel), sha256: digest, mime_type: 'audio/mpeg' }, actual_cost_usd: 0.05 } })
+} else {
+  reject(`fake sonora does not implement: ${cmd ?? ''}`)
+}

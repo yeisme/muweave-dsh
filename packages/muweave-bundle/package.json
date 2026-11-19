@@ -1,0 +1,20 @@
+{
+  "name": "@yeisme/muweave-bundle",
+  "version": "0.1.0",
+  "description": "CLI-authored .muweave/ materialized workspace bundle compiler and dual-surface consumer SDK",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "muweave-bundle": "./lib/cli.js"
+  },
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./consumer": "./lib/consumer.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "README.md"
+  ]
+}

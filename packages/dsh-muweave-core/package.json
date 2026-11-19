@@ -1,0 +1,25 @@
+{
+  "name": "@yeisme/dsh-muweave-core",
+  "version": "0.1.0",
+  "description": "Shared host RPC bus, Range media server, dual-mode Tab/Pane shell, 3-state floating agent and timing progress strip for MuWeave DSH plugins",
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./protocol": "./lib/protocol.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4"
+  },
+  "engines": {
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.2-rc.2 <0.3.0"
+  }
+}

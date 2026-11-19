@@ -1,0 +1,4 @@
+- insert:
+    - id: muweave-drama
+      name: '@yeisme/dsh-muweave-drama'
+      config: {}

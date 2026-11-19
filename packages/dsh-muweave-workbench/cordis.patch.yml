@@ -1,0 +1,4 @@
+- insert:
+    - id: muweave-workbench
+      name: '@yeisme/dsh-muweave-workbench'
+      config: {}

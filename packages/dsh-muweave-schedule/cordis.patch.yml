@@ -1,0 +1,4 @@
+- insert:
+    - id: muweave-schedule
+      name: '@yeisme/dsh-muweave-schedule'
+      config: {}

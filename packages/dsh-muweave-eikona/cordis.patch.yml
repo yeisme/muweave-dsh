@@ -1,0 +1,4 @@
+- insert:
+    - id: muweave-eikona
+      name: '@yeisme/dsh-muweave-eikona'
+      config: {}
