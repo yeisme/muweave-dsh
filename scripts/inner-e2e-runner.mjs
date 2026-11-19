@@ -501,7 +501,7 @@ try {
   process.stdout.write('Verified full-width stage with the room filter in a popover.\n')
 
   // Desk v3: command palette lists rooms + stage views + actions and closes on Escape
-  await page.getByRole('button', { name: /⌘K/ }).first().click()
+  await page.locator('[data-muweave-open-palette="true"]').first().click()
   const palette = page.locator('[data-muweave-command-palette="true"]')
   await palette.waitFor({ state: 'visible', timeout: 5_000 })
   await page.waitForTimeout(350)

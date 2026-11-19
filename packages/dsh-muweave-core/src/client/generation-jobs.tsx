@@ -9,7 +9,7 @@ import type {
   JobSlotV1,
   RpcErrorShape,
 } from '../protocol'
-import { Callout, Icon, StatusTag } from './ui'
+import { Callout, Icon, StatusTag, ToneDot } from './ui'
 import type { MuweaveDictKey, MuweaveTranslator } from './i18n'
 import { MediaPreview } from './media'
 import type { MuweaveRpcClient } from './rpc-client'
@@ -32,6 +32,14 @@ export function fmtCost(t: MuweaveTranslator, c: CostAmountV1 | undefined): stri
   if (!c || c.amount === undefined || c.unit === 'none') return undefined
   const n = Number(c.amount.toFixed(4))
   return c.unit === 'usd' ? `$${n}` : `${n} ${tr(t, `genUnit_${c.unit}`)}`
+}
+
+function slotTone(status: JobSlotV1['status']): 'neutral' | 'info' | 'ok' | 'bad' | 'warn' {
+  if (status === 'done') return 'ok'
+  if (status === 'failed') return 'bad'
+  if (status === 'running') return 'info'
+  if (status === 'pending') return 'neutral'
+  return 'warn'
 }
 
 /** One slot's media: image via the media route, audio with controls, anything else as its label. */
@@ -251,6 +259,7 @@ export function JobRow({
   planLines,
   lang,
   onChanged,
+  dataAttribute = 'job',
 }: {
   rpc: MuweaveRpcClient
   t: MuweaveTranslator
@@ -261,8 +270,10 @@ export function JobRow({
   planLines?: readonly string[]
   lang: string
   onChanged: () => void
+  dataAttribute?: 'job' | 'tool-run'
 }) {
   const [error, setError] = useState<string | undefined>(undefined)
+  const [cancelBusy, setCancelBusy] = useState(false)
   const review = async (slot: JobSlotV1, decision: 'accept' | 'reject') => {
     setError(undefined)
     const res = await rpc.call('job.slot.review', {
@@ -275,25 +286,42 @@ export function JobRow({
     else if (decision === 'accept' && job.anchor?.shotRef) notifyShotMediaChanged()
     onChanged()
   }
+  const cancel = async () => {
+    setCancelBusy(true)
+    setError(undefined)
+    const res = await rpc.call('job.cancel', { jobId: job.jobId })
+    setCancelBusy(false)
+    if (!res.ok) setError(errText(t, res.error))
+    onChanged()
+  }
   const finished = job.status === 'waiting_for_human' || job.status === 'completed' || job.status === 'cancelled' || job.status === 'failed'
   const actual = fmtCost(t, job.actualCost)
   const anchor = [job.anchor?.episodeRef, job.anchor?.sceneRef, job.anchor?.shotRef].filter(Boolean).join(' / ')
+  const doneSlots = job.slots.filter((slot) => slot.status === 'done').length
+  const summary = job.errorCode
+    ? job.errorCode
+    : doneSlots > 0
+      ? `${doneSlots}/${job.slots.length} ${tr(t, 'genSlot_done')}`
+      : tr(t, `genStatus_${job.status}`) || job.status
   return (
-    <li className="mw-dsh-card mw-gen-job" data-flat="true" data-muweave-job={job.jobId} data-status={job.status}>
+    <li className="mw-dsh-card mw-gen-job" data-flat="true" {...(dataAttribute === 'tool-run' ? { 'data-muweave-tool-run': job.jobId } : { 'data-muweave-job': job.jobId })} data-status={job.status}>
       <div className="mw-spread">
-        <span className="mw-title">{job.title}</span>
+        <div className="mw-row" data-gap="xs"><ToneDot tone={job.status === 'failed' ? 'bad' : job.status === 'completed' ? 'ok' : job.status === 'reconcile_required' ? 'warn' : 'info'} title={job.status} /><span className="mw-title">{job.title}</span></div>
         <StatusTag status={job.status} lang={lang} label={tr(t, `genStatus_${job.status}`) || job.status} />
       </div>
       <div className="mw-row" data-gap="xs">
         <span className="mw-chip">{job.owner}</span>
+        <span className="mw-dsh-muted">{summary}</span>
         {anchor ? <span className="mw-chip" data-mono="true" title={tr(t, 'genAnchor')}>{anchor}</span> : null}
         {job.errorCode ? <span className="mw-chip" data-mono="true">{job.errorCode}</span> : null}
       </div>
       {job.status === 'waiting_approval' ? (
         <ApprovalCard rpc={rpc} t={t} job={job} capability={capability} budget={budget} paidEnabled={paidEnabled} planLines={planLines} onChanged={onChanged} />
       ) : null}
+      {job.status === 'queued' || job.status === 'running' ? <PillButton disabled={cancelBusy} onClick={() => void cancel()} data-muweave-tool-cancel={job.jobId}>{tr(t, 'genCancel')}</PillButton> : null}
       {job.status === 'reconcile_required' ? <ReconcileCard rpc={rpc} t={t} job={job} onChanged={onChanged} /> : null}
       {job.errorCode ? <Callout tone="bad">{errText(t, { code: job.errorCode, message: job.errorCode })}</Callout> : null}
+      {job.slots.length > 0 ? <div className="mw-row" data-gap="xs" aria-label={job.status}>{job.slots.map((slot) => <ToneDot key={slot.slotId} tone={slotTone(slot.status)} title={slot.status} />)}</div> : null}
       {job.slots.length > 0 && job.status !== 'waiting_approval' ? (
         <ul className="mw-gen-slots" data-muweave-slots="true">
           {job.slots.map((slot) => (

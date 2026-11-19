@@ -20,7 +20,8 @@ import {
 import { PillButton } from './editorial'
 import { getFloatingAgentSnapshot } from './floating-agent'
 import { closeGeneration, openGeneration, useGenerationStore } from './generation-store'
-import { JobRow, errText, fmtCost, tr } from './generation-jobs'
+import { errText, fmtCost, tr } from './generation-jobs'
+import { ToolRunCard } from './tool-run-card'
 import type { MuweaveTranslator } from './i18n'
 import type { MuweaveRpcClient } from './rpc-client'
 import { Callout, EmptyState, Icon, SectionHead } from './ui'
@@ -301,7 +302,7 @@ function GenerationDrawer({
       ) : (
         <ul className="mw-stack" data-muweave-jobs="true">
           {jobs.slice(0, 20).map((job) => (
-            <JobRow
+            <ToolRunCard
               key={job.jobId}
               rpc={rpc}
               t={t}
@@ -310,7 +311,6 @@ function GenerationDrawer({
               budget={budget}
               paidEnabled={catalog?.paidEnabled ?? budget?.paidEnabled ?? false}
               planLines={planLines.get(job.jobId)}
-              lang={lang}
               onChanged={onChanged}
             />
           ))}

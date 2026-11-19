@@ -34,6 +34,30 @@ export const MUWEAVE_KEYMAP: readonly KeyBinding[] = [
 
 export const keymap = MUWEAVE_KEYMAP
 
+function defaultKeyHintPlatform(): 'mac' | 'other' {
+  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? '') ? 'mac' : 'other'
+}
+
+/** Formats the portable key names used by the keymap for the current platform. */
+export function formatKeyHint(keys: string, platform: 'mac' | 'other' = defaultKeyHintPlatform()): string {
+  return keys
+    .split('+')
+    .map((part, index, all) => {
+      const token = normalizeKey(part)
+      if (token === 'mod') return platform === 'mac' ? '⌘' : 'Ctrl+'
+      if (token === 'shift') return platform === 'mac' ? '⇧' : 'Shift+'
+      if (token === 'alt') return platform === 'mac' ? '⌥' : 'Alt+'
+      if (token === 'ctrl') return 'Ctrl+'
+      if (token === 'meta') return '⌘'
+      if (token === 'escape') return 'Esc'
+      if (token === 'space') return 'Space'
+      if (index < all.length - 1) return `${part}+`
+      return token.length === 1 ? token.toUpperCase() : part
+    })
+    .join('')
+    .replace(/\+$/, '')
+}
+
 function normalizeKey(key: string): string {
   const value = key.trim().toLowerCase()
   if (value === 'esc') return 'escape'

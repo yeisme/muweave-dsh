@@ -597,6 +597,7 @@ export {
   type ProjectCoverRef,
 } from './media'
 export { GenerationLauncher } from './generation'
+export { formatKeyHint } from './keymap'
 export {
   closeGeneration,
   getGenerationSnapshot,

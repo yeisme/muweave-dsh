@@ -1,5 +1,5 @@
 /**
- * Desk v3 command palette (docs/design/desk-v3.md): ⌘K opens one searchable list of rooms, stage
+ * Desk v3 command palette (docs/design/desk-v3.md): the mod+K shortcut opens one searchable list of rooms, stage
  * views and shell actions so the toolbar does not have to carry them all. Pure presentation: the
  * shell owns what the commands do, this file owns matching, keyboard movement and focus return.
  */

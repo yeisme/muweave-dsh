@@ -10,6 +10,7 @@ import { useTiltDelegation } from './motion'
 import { getActiveTheaterRoomId, getTheaterRooms, setActiveTheaterRoom, theaterChromeContext } from './theater/registry'
 import type { CapabilityStage, MuweaveIndexV1 } from '../protocol'
 import { Icon, IconButton, Segmented } from './ui'
+import { formatKeyHint } from './keymap'
 
 export type StageSplitMode = 'single' | 'horizontal' | 'vertical'
 export type WorkspacePresetId = 'balanced' | 'focus' | 'compare'
@@ -82,7 +83,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 /**
  * One-layer workspace (docs/design/desk-v3.md): the stage is full width, room filters live in a
- * popover, every layout control lives behind one 「视图」 popover, and ⌘K opens one searchable list of
+ * popover, every layout control lives behind one 「视图」 popover, and the mod+K shortcut opens one searchable list of
  * rooms / stage views / shell actions. Publishes its container bounding box via ResizeObserver so the
  * `shell.overlay` Floating Agent stays strictly within `.mw-dsh-root` and never covers DSH's sidebar.
  */
@@ -182,7 +183,7 @@ export function WorkspaceShell({
   useEffect(() => {
     const onKeyDown = (ev: KeyboardEvent) => {
       // The theater can keep other rooms mounted; only the visible shell owns the shortcuts,
-      // otherwise one ⌘K is handled twice and the palette opens then closes.
+      // otherwise one mod+K shortcut is handled twice and the palette opens then closes.
       const mine = rootRef.current
       const roots = Array.from(document.querySelectorAll('[data-muweave-workspace-root="true"]'))
       const visible = roots.filter((el): el is HTMLElement => el instanceof HTMLElement && el.offsetParent !== null)
@@ -402,9 +403,10 @@ export function WorkspaceShell({
             )}
           </button>
           <IconButton
+            data-muweave-open-palette="true"
             icon="command"
             size="sm"
-            label={t('commandOpenHint')}
+            label={t('commandOpenHint').replace('{mod}K', formatKeyHint('mod+k'))}
             pressed={paletteOpen}
             onClick={() => setPaletteOpen(true)}
           />
