@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MuWeave DSH · 工作台 v8 高保真稿</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Token：取自 packages/dsh-muweave-core/src/client/styles.ts 真实值 */
+:root {
+  --mw-accent: #0A84FF;
+  --mw-accent-hover: #0066CC;
+  --mw-on-accent: #ffffff;
+  --mw-surface: #ffffff;
+  --mw-label: #1c1c1e;
+  --mw-label-2: #636366;
+  /* styles.ts 中的派生弱文字：label-2 的 72% */
+  --mw-label-3: color-mix(in oklab, var(--mw-label-2) 72%, transparent);
+  --line: color-mix(in oklab, #1c1c1e 8%, transparent);
+  --line-strong: color-mix(in oklab, #1c1c1e 16%, transparent);
+  --fill-1: color-mix(in oklab, #1c1c1e 4%, transparent);
+  --fill-2: color-mix(in oklab, #1c1c1e 8%, transparent);
+  --fill-3: color-mix(in oklab, #1c1c1e 13%, transparent);
+  --r-1: 0.25rem;
+  --r-2: 0.5rem;
+  --r-3: 0.75rem;
+  --elev-1: 0 0.0625rem 0.125rem rgba(28,28,30,.08), 0 0.5rem 1.5rem -0.875rem rgba(28,28,30,.14);
+  /* 低饱和状态文字色：只用于文字与小圆点 */
+  --ok: #1c8c3f;
+  --warn: #b25000;
+  --err: #c4291c;
+
+  --font: -apple-system, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+  --row: 2rem;
+  --rail-w: 12rem;
+  --insp-w: 20rem;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; }
+body {
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--mw-label);
+  background: var(--mw-surface);
+  -webkit-font-smoothing: antialiased;
+}
+.num, time { font-variant-numeric: tabular-nums; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+ul { list-style: none; }
+svg.i { width: 1rem; height: 1rem; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.sm { width: 0.875rem; height: 0.875rem; }
+
+/* 外层展台：中性背景，两块画布垂直排列，间隔 4rem */
+.page {
+  min-height: 100vh;
+  padding: 3rem 0 4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rem;
+  background: var(--fill-3);
+}
+.board { display: flex; flex-direction: column; gap: 0.75rem; }
+.board-cap { display: flex; align-items: baseline; gap: 0.75rem; color: var(--mw-label-2); font-size: 0.8125rem; }
+.board-cap b { color: var(--mw-label); font-weight: 600; }
+
+.canvas {
+  width: 90rem;
+  height: 56.25rem;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: 2.75rem 3rem 1fr;
+  background: var(--mw-surface);
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 1px var(--line-strong), var(--elev-1);
+}
+
+/* 顶栏：房间 tabs + 右侧动作 */
+.topbar {
+  display: flex; align-items: center; gap: 1.5rem;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--fill-1);
+}
+.brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 0.8125rem; }
+.brand-mark { width: 1.25rem; height: 1.25rem; border-radius: var(--r-1); background: var(--mw-label); color: var(--mw-surface); display: grid; place-items: center; }
+.brand-mark svg.i { width: 0.75rem; height: 0.75rem; stroke-width: 2; }
+.rooms { display: flex; height: 100%; gap: 0.25rem; }
+.room {
+  position: relative; display: flex; align-items: center;
+  padding: 0 0.625rem; color: var(--mw-label-2);
+}
+.room:hover { color: var(--mw-label); }
+.room[aria-current="page"] { color: var(--mw-accent); font-weight: 600; }
+.room[aria-current="page"]::after {
+  content: ""; position: absolute; left: 0.625rem; right: 0.625rem; bottom: -1px;
+  height: 2px; background: var(--mw-accent); border-radius: 1px;
+}
+.top-actions { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
+.cmdk {
+  display: flex; align-items: center; gap: 0.5rem;
+  height: 1.75rem; width: 15rem; padding: 0 0.5rem 0 0.625rem;
+  border-radius: var(--r-2); background: var(--fill-2); color: var(--mw-label-3);
+}
+.cmdk kbd { margin-left: auto; }
+kbd {
+  font-family: var(--font); font-size: 0.6875rem; line-height: 1;
+  padding: 0.1875rem 0.3125rem; border-radius: var(--r-1);
+  background: var(--mw-surface); color: var(--mw-label-2);
+  box-shadow: 0 0 0 1px var(--line-strong);
+  font-variant-numeric: tabular-nums;
+}
+.icon-btn { width: 1.75rem; height: 1.75rem; display: grid; place-items: center; border-radius: var(--r-2); color: var(--mw-label-2); }
+.icon-btn:hover { background: var(--fill-2); color: var(--mw-label); }
+
+/* 按钮 */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+  height: var(--row); padding: 0 0.875rem; border-radius: var(--r-2);
+  font-size: 0.8125rem; font-weight: 500; white-space: nowrap;
+}
+.btn.sm { height: 1.75rem; padding: 0 0.625rem; }
+.btn-primary { background: var(--mw-accent); color: var(--mw-on-accent); }
+.btn-primary:hover { background: var(--mw-accent-hover); }
+.btn-secondary { background: var(--fill-2); color: var(--mw-label); }
+.btn-secondary:hover { background: var(--fill-3); }
+.btn-plain { color: var(--mw-accent); padding: 0 0.5rem; }
+.btn.block { width: 100%; }
+
+/* 项目条 */
+.projbar {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.proj-title { font-size: 0.9375rem; font-weight: 600; }
+.proj-title span { color: var(--mw-label-2); font-weight: 400; }
+.pill {
+  display: inline-flex; align-items: center; gap: 0.3125rem;
+  height: 1.375rem; padding: 0 0.5rem; border-radius: 62.4375rem;
+  background: var(--fill-2); color: var(--mw-label-2); font-size: 0.75rem; font-weight: 500;
+}
+.dot { width: 0.375rem; height: 0.375rem; border-radius: 50%; background: currentColor; flex: none; }
+.meta { display: flex; align-items: center; gap: 0.5rem; color: var(--mw-label-2); }
+.meta .sep { width: 1px; height: 0.75rem; background: var(--line-strong); }
+.meta b { color: var(--mw-label); font-weight: 600; }
+.warn-t { color: var(--warn); }
+.ok-t { color: var(--ok); }
+.err-t { color: var(--err); }
+.proj-right { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; color: var(--mw-label-3); font-size: 0.75rem; }
+
+/* 主体三栏 */
+.body { display: grid; grid-template-columns: var(--rail-w) 1fr var(--insp-w); min-height: 0; }
+
+/* 阶段纵轴 */
+.rail {
+  display: flex; flex-direction: column;
+  padding: 0.75rem 0;
+  background: var(--fill-1);
+  border-right: 1px solid var(--line);
+}
+.rail-h {
+  display: flex; align-items: center; justify-content: space-between;
+  height: var(--row); padding: 0 1rem;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; color: var(--mw-label-3);
+}
+.stage {
+  position: relative; display: flex; align-items: center; gap: 0.625rem;
+  height: var(--row); padding: 0 1rem; color: var(--mw-label);
+}
+.stage:hover { background: var(--fill-1); }
+.stage[aria-current="step"] { background: var(--fill-2); font-weight: 600; }
+.stage[aria-current="step"]::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--mw-accent);
+}
+.stage .count { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--mw-label-2); font-weight: 600; }
+.stage .count.zero { color: var(--mw-label-3); font-weight: 400; }
+.stage.off { color: var(--mw-label-3); }
+/* 状态圆点：实心=完成，半环=进行中，空心=未开始 */
+.sdot { width: 0.625rem; height: 0.625rem; flex: none; stroke-width: 1.5; }
+.sdot.done { fill: var(--ok); stroke: var(--ok); }
+.sdot.doing { fill: none; stroke: var(--mw-label); }
+.sdot.doing .half { fill: var(--mw-label); stroke: none; }
+.sdot.todo { fill: none; stroke: var(--line-strong); }
+.sdot.na { fill: none; stroke: var(--line-strong); stroke-dasharray: 2 2; }
+.rail-div { height: 1px; margin: 0.5rem 1rem; background: var(--line); }
+.rail-note { padding: 0 1rem; font-size: 0.6875rem; color: var(--mw-label-3); line-height: 1.5; }
+.rail-foot {
+  margin-top: auto; padding: 0.75rem 1rem 0.25rem; border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: auto 1fr; gap: 0.375rem 0.5rem; align-items: center;
+  font-size: 0.6875rem; color: var(--mw-label-3);
+}
+.rail-foot kbd { justify-self: start; }
+
+/* 阶段工作面 */
+.work {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  padding: 1rem 1.5rem 0;
+}
+.work-h { display: flex; align-items: baseline; gap: 0.75rem; height: 2.5rem; }
+.work-h h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
+.work-h .meta { font-size: 0.75rem; }
+.work-h .hints { margin-left: auto; display: flex; align-items: center; gap: 0.375rem; font-size: 0.6875rem; color: var(--mw-label-3); }
+.work-h .hints span + kbd { margin-left: 0.5rem; }
+.eyebrow {
+  display: flex; align-items: center; gap: 0.375rem;
+  height: 1.5rem; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; color: var(--mw-label-3);
+}
+.eyebrow .num { color: var(--mw-label-2); }
+.eyebrow .end { margin-left: auto; font-weight: 400; letter-spacing: 0; }
+
+.top-row { display: grid; grid-template-columns: 30rem 1fr; gap: 1.5rem; margin-top: 0.5rem; }
+
+/* L1 主产物 */
+.l1 {
+  border-radius: var(--r-3); background: var(--mw-surface);
+  box-shadow: 0 0 0 1px var(--line), var(--elev-1);
+  overflow: hidden;
+}
+.l1.is-selected { box-shadow: 0 0 0 2px var(--mw-accent), var(--elev-1); }
+.thumb {
+  position: relative; overflow: hidden;
+  background-color: var(--fill-2);
+  /* 细网格线示意（发丝线，不是色块） */
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 1.5rem 1.5rem;
+  background-position: -1px -1px;
+}
+.thumb.wide { aspect-ratio: 16 / 9; }
+.thumb .thirds { position: absolute; inset: 0; width: 100%; height: 100%; }
+.thumb .thirds line { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.thumb .fig { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--fill-2); stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.thumb .spec {
+  position: absolute; left: 0.5rem; bottom: 0.5rem;
+  padding: 0.125rem 0.375rem; border-radius: var(--r-1);
+  background: var(--mw-surface); color: var(--mw-label-2);
+  font-size: 0.6875rem; font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.l1-body { padding: 0.75rem 1rem 0.875rem; display: grid; grid-template-columns: 1fr auto; gap: 0.25rem 1rem; align-items: center; }
+.l1-title { font-size: 0.9375rem; font-weight: 600; }
+.l1-status { color: var(--mw-label-2); font-size: 0.8125rem; display: flex; align-items: center; gap: 0.375rem; }
+.l1-actions { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 0.5rem; }
+
+/* 右侧：L2 变体带 + 关键属性 */
+.side { display: flex; flex-direction: column; min-width: 0; }
+.l2 { display: flex; gap: 0.5rem; }
+.variant { position: relative; width: 7.5rem; flex: none; }
+.variant .thumb { width: 7.5rem; height: 5.625rem; border-radius: var(--r-2); box-shadow: inset 0 0 0 1px var(--line); }
+.variant.is-on .thumb { box-shadow: 0 0 0 2px var(--mw-accent); }
+.variant .ver {
+  position: absolute; right: 0.3125rem; bottom: 0.3125rem;
+  padding: 0 0.25rem; border-radius: var(--r-1);
+  background: var(--mw-surface); font-size: 0.625rem; line-height: 1rem; color: var(--mw-label-2);
+  font-variant-numeric: tabular-nums;
+}
+.variant.is-on .ver { color: var(--mw-accent); font-weight: 600; }
+.variant .cap { margin-top: 0.25rem; font-size: 0.6875rem; color: var(--mw-label-3); }
+.variant.is-on .cap { color: var(--mw-label-2); }
+
+.kv { margin-top: 1rem; }
+.kv-row { display: flex; align-items: center; height: var(--row); border-top: 1px solid var(--line); }
+.kv-row:last-child { border-bottom: 1px solid var(--line); }
+.kv-row dt { width: 5rem; color: var(--mw-label-2); }
+.kv-row dd { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.375rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.owner {
+  display: inline-flex; align-items: center; height: 1.125rem; padding: 0 0.375rem;
+  border-radius: var(--r-1); background: var(--fill-2);
+  font-size: 0.6875rem; font-weight: 500; color: var(--mw-label-2); letter-spacing: 0.01em;
+}
+
+/* L3 待办队列 */
+.l3 { margin-top: 1.25rem; }
+.q { border-top: 1px solid var(--line); }
+.q-row {
+  display: grid; grid-template-columns: 1.25rem 1fr 4.5rem 6.5rem 1rem; align-items: center; gap: 0.75rem;
+  height: var(--row); padding: 0 0.5rem; border-bottom: 1px solid var(--line);
+}
+.q-row:hover { background: var(--fill-1); }
+.q-row .ic { color: var(--mw-label-3); display: grid; place-items: center; }
+.q-row .ic.warn-t { color: var(--warn); }
+.q-row .ic.ok-t { color: var(--ok); }
+.l3 + .l3 { margin-top: 1rem; }
+.q-row .name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.q-row .name small { color: var(--mw-label-3); font-size: 0.75rem; margin-left: 0.375rem; }
+.q-row time { text-align: right; color: var(--mw-label-2); font-size: 0.75rem; }
+.q-row .go { color: var(--mw-label-3); display: grid; place-items: center; }
+
+/* 版本带：钉在工作面底部 */
+.verbar {
+  margin-top: auto;
+  display: flex; align-items: center; gap: 0.75rem;
+  height: 3.25rem; border-top: 1px solid var(--line);
+}
+.verbar .lbl { color: var(--mw-label-2); }
+.vers { display: flex; padding: 0.125rem; gap: 0.125rem; border-radius: var(--r-2); background: var(--fill-2); }
+.ver-chip {
+  height: 1.5rem; min-width: 2.25rem; padding: 0 0.5rem; border-radius: 0.375rem;
+  font-size: 0.75rem; font-variant-numeric: tabular-nums; color: var(--mw-label-2);
+}
+.ver-chip[aria-pressed="true"] { background: var(--mw-surface); color: var(--mw-label); font-weight: 600; box-shadow: var(--elev-1), 0 0 0 1px var(--line); }
+.verbar .base { display: flex; align-items: center; gap: 0.375rem; }
+.verbar .base b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.badge-warn {
+  display: inline-flex; align-items: center; gap: 0.25rem; height: 1.375rem; padding: 0 0.5rem;
+  border-radius: 62.4375rem; box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--warn); font-size: 0.75rem; font-weight: 500;
+}
+.verbar .push { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
+.verbar .push small { color: var(--mw-label-3); font-size: 0.6875rem; }
+
+/* 检查器 */
+.insp {
+  display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--line);
+  padding: 1rem 1rem 0.75rem;
+  overflow: hidden;
+}
+.insp-h { display: flex; align-items: center; gap: 0.5rem; height: var(--row); }
+.insp-h h2 { font-size: 0.9375rem; font-weight: 600; }
+.insp-h .sub { color: var(--mw-label-3); font-size: 0.75rem; }
+.insp-h .icon-btn { margin-left: auto; }
+.insp-lead { color: var(--mw-label-2); font-size: 0.75rem; line-height: 1.5; margin-bottom: 0.5rem; }
+
+.grp { margin-top: 0.75rem; }
+.grp-h {
+  display: flex; align-items: center; gap: 0.375rem; height: var(--row);
+  font-size: 0.75rem; font-weight: 600; color: var(--mw-label);
+  border-bottom: 1px solid var(--line);
+}
+.grp-h .n { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--mw-label-2); font-weight: 600; }
+.grp-h .n.zero { color: var(--mw-label-3); font-weight: 400; }
+.grp-empty { padding: 0.5rem 0 0.25rem; color: var(--mw-label-2); font-size: 0.75rem; line-height: 1.55; }
+.tool {
+  display: grid; grid-template-columns: 1fr auto 1rem; align-items: center; gap: 0.5rem;
+  min-height: var(--row); padding: 0.25rem 0.375rem; margin: 0 -0.375rem;
+  border-radius: var(--r-1); text-align: left; width: calc(100% + 0.75rem);
+}
+.tool + .tool { border-top: 1px solid var(--line); border-radius: 0; }
+button.tool:hover { background: var(--fill-1); }
+.tool .tn { font-size: 0.8125rem; }
+.tool .tn small { display: block; color: var(--mw-label-3); font-size: 0.6875rem; line-height: 1.4; }
+.tool .go { color: var(--mw-accent); display: grid; place-items: center; }
+.tool.off { grid-template-columns: 1fr auto; cursor: default; }
+.tool.off .tn { color: var(--mw-label-3); }
+.tool.off .tn small { color: var(--mw-label-2); }
+.tool.off .owner { opacity: 0.6; }
+.more { display: block; margin-top: 0.25rem; padding: 0.25rem 0; font-size: 0.75rem; color: var(--mw-accent); }
+.insp-foot {
+  margin-top: auto; padding-top: 0.75rem; border-top: 1px solid var(--line);
+  font-size: 0.6875rem; line-height: 1.5; color: var(--mw-label-3);
+  display: flex; gap: 0.375rem;
+}
+
+/* 检查器 · 选中态 */
+.el-prev { margin-top: 0.25rem; border-radius: var(--r-2); box-shadow: inset 0 0 0 1px var(--line); }
+.el-title { margin-top: 0.75rem; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; }
+.el-line { margin-top: 0.25rem; display: flex; align-items: center; gap: 0.375rem; color: var(--mw-label-2); font-size: 0.75rem; }
+.el-kv { margin-top: 0.75rem; }
+.el-kv .kv-row dt { width: 4.5rem; }
+.digest {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.75rem; color: var(--mw-label-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.copy { margin-left: auto; color: var(--mw-label-3); display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: var(--r-1); }
+.copy:hover { background: var(--fill-2); color: var(--mw-label); }
+.el-actions { margin-top: 1rem; display: grid; gap: 0.5rem; }
+.el-actions .note { font-size: 0.6875rem; color: var(--mw-label-3); line-height: 1.5; text-align: center; }
+.refs { margin-top: 1rem; }
+.ref { display: flex; align-items: center; gap: 0.5rem; height: var(--row); border-bottom: 1px solid var(--line); }
+.ref .rn { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+.sprite { position: absolute; }
+.verbar .why { font-size: 0.75rem; }
+.ref.first { border-top: 1px solid var(--line); }
+.small { font-size: 0.75rem; }
+:focus-visible { outline: 2px solid var(--mw-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<svg class="sprite" width="0" height="0" aria-hidden="true">
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M4 18V6l8 7 8-7v12"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4"/><path d="M12 16.8v.2"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M14.5 5v14"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M19 8.5A7.5 7.5 0 0 0 5.2 9"/><path d="M5 15.5A7.5 7.5 0 0 0 18.8 15"/><path d="M19 4.5v4h-4"/><path d="M5 19.5v-4h4"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.8 12S6 5.8 12 5.8 21.2 12 21.2 12 18 18.2 12 18.2 2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+  <symbol id="i-compare" viewBox="0 0 24 24"><rect x="3.5" y="5" width="7" height="14" rx="1.5"/><rect x="13.5" y="5" width="7" height="14" rx="1.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.5 21 19.5H3Z"/><path d="M12 10v4"/><path d="M12 16.8v.2"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11Z"/><path d="M13.5 3.5v4h4"/><path d="M9 12.5h6M9 16h6"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M13.5 4.5h6v6"/><path d="m19.5 4.5-8 8"/><path d="M18 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H10"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><path d="M12 7.8v.2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+</svg>
+<div class="page">
+  <section class="board">
+    <div class="board-cap"><b>画布 A</b><span>未选中 · 检查器显示工具目录</span><span class="num">1440 × 900</span></div>
+  <div class="canvas">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-logo"/></svg></span>MuWeave</div>
+      <nav class="rooms" aria-label="房间">
+        <a class="room" aria-current="page">Overview</a>
+        <a class="room">Visual</a>
+        <a class="room">Script</a>
+        <a class="room">Production</a>
+        <a class="room">Draft</a>
+        <a class="room">Toolkit</a>
+        <a class="room">Schedule</a>
+      </nav>
+      <div class="top-actions">
+        <button class="cmdk"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg><span>搜索或运行命令</span><kbd>⌘K</kbd></button>
+        <button class="icon-btn" title="键位表 ?"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-help"/></svg></button>
+        <button class="icon-btn" title="切换检查器"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-panel"/></svg></button>
+        <button class="btn btn-secondary sm">生成台</button>
+      </div>
+    </header>
+    <div class="projbar">
+      <div class="proj-title">雨夜重逢 <span>· 第一集</span></div>
+      <span class="pill"><span class="dot"></span>准备中</span>
+      <div class="meta">
+        <span><b class="num">10</b> 元件</span><span class="sep"></span>
+        <span><b class="num">3</b> 待处理</span><span class="sep"></span>
+        <span class="warn-t"><span class="num">1</span> 基线落后</span>
+      </div>
+      <div class="proj-right"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sync"/></svg><span>已同步 <time>14:32</time></span></div>
+    </div>
+    <div class="body">
+      <aside class="rail" aria-label="阶段">
+        <div class="rail-h"><span>阶段</span><span class="num">3 / 4</span></div>
+        <a class="stage"><svg class="sdot done" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>灵感</span><span class="count zero">0</span></a>
+        <a class="stage"><svg class="sdot done" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>剧本</span><span class="count zero">0</span></a>
+        <a class="stage" aria-current="step"><svg class="sdot doing" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/><path class="half" d="M5 .75a4.25 4.25 0 0 1 0 8.5Z"/></svg><span>视觉</span><span class="count">3</span></a>
+        <a class="stage"><svg class="sdot todo" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>分镜</span><span class="count">1</span></a>
+        <div class="rail-div"></div>
+        <div class="stage off"><svg class="sdot na" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>声音</span><span class="count zero">—</span></div>
+        <div class="stage off"><svg class="sdot na" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>发布</span><span class="count zero">—</span></div>
+        <p class="rail-note">声音与发布暂无真实产物，接入数据后启用。</p>
+        <div class="rail-foot">
+          <kbd>J</kbd><span>下一阶段</span>
+          <kbd>K</kbd><span>上一阶段</span>
+          <kbd>G 1–4</kbd><span>跳到第 N 阶段</span>
+        </div>
+      </aside>
+      <main class="work">
+        <div class="work-h">
+          <h1>视觉</h1>
+          <div class="meta"><span><span class="num">4</span> 个元件</span><span class="sep"></span><span><span class="num">3</span> 待处理</span></div>
+          <div class="hints"><kbd>Tab</kbd><span>切换区域</span><kbd>↵</kbd><span>打开</span><kbd>⇧↵</kbd><span>对比基线</span></div>
+        </div>
+
+        <div class="top-row">
+          <section>
+            <div class="eyebrow">主产物</div>
+            <article class="l1" tabindex="0">
+              <div class="thumb wide"><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="92" cy="34" r="11"/><path d="M68 90c0-20 10-34 24-34s24 14 24 34"/></svg><span class="spec">16:9 · 1536×864</span></div>
+              <div class="l1-body">
+                <div class="l1-title">沈岚 · 雨夜定妆</div>
+                <div class="l1-actions">
+                  <button class="btn btn-primary"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye"/></svg>审阅</button>
+                  <button class="btn btn-secondary"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compare"/></svg>对比基线</button>
+                </div>
+                <div class="l1-status"><span class="dot warn-t"></span>采用变体 v3·b，等待你审阅后设为基线</div>
+              </div>
+            </article>
+          </section>
+
+          <section class="side">
+            <div class="eyebrow">变体 <span class="num">3</span><span class="end">同一轮 v3 的候选</span></div>
+            <div class="l2">
+              <div class="variant"><div class="thumb "><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="60" cy="34" r="11"/><path d="M36 90c0-20 10-34 24-34s24 14 24 34"/></svg><span class="ver">v3·a</span></div><div class="cap">偏冷 · 远景</div></div>
+              <div class="variant is-on"><div class="thumb "><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="92" cy="34" r="11"/><path d="M68 90c0-20 10-34 24-34s24 14 24 34"/></svg><span class="ver">v3·b</span></div><div class="cap">已采用</div></div>
+              <div class="variant"><div class="thumb "><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="110" cy="34" r="11"/><path d="M86 90c0-20 10-34 24-34s24 14 24 34"/></svg><span class="ver">v3·c</span></div><div class="cap">逆光 · 近景</div></div>
+            </div>
+            <dl class="kv">
+              <div class="kv-row"><dt>owner</dt><dd><span class="owner">eikona</span></dd></div>
+              <div class="kv-row"><dt>类型</dt><dd>角色定妆 · character_master</dd></div>
+              <div class="kv-row"><dt>审阅</dt><dd class="warn-t">待审阅</dd></div>
+              <div class="kv-row"><dt>依据</dt><dd>剧本 第 12 场 <span class="warn-t">· r5（最新 r6）</span></dd></div>
+            </dl>
+          </section>
+        </div>
+
+        <section class="l3">
+          <div class="eyebrow">待办 <span class="num">3</span><span class="end">按到达时间</span></div>
+          <ul class="q">
+            <li class="q-row"><span class="ic"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye"/></svg></span><span class="name">审阅「沈岚 · 雨夜定妆」v3 候选<small>3 个变体</small></span><span><span class="owner">eikona</span></span><time>11-19 14:20</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+            <li class="q-row"><span class="ic warn-t"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-alert"/></svg></span><span class="name">分镜 S03 引用旧基线 v2，需要重新绑定<small>落后 1 版</small></span><span><span class="owner">scaena</span></span><time>11-19 13:05</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+            <li class="q-row"><span class="ic"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-doc"/></svg></span><span class="name">确认生成计划「雨夜街景 · 三机位」<small>Plan</small></span><span><span class="owner">pi</span></span><time>11-18 22:40</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+          </ul>
+        </section>
+
+        <section class="l3">
+          <div class="eyebrow">本阶段其他元件 <span class="num">3</span><span class="end">L3 · 点开在检查器查看</span></div>
+          <ul class="q">
+            <li class="q-row"><span class="ic ok-t"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span><span class="name">林舟 · 雨夜定妆<small>基线 v2</small></span><span><span class="owner">eikona</span></span><time>11-18 19:12</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+            <li class="q-row"><span class="ic ok-t"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span><span class="name">雨夜街口 · 场景母版<small>基线 v4</small></span><span><span class="owner">eikona</span></span><time>11-18 16:47</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+            <li class="q-row"><span class="ic"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clock"/></svg></span><span class="name">道具 · 黑伞<small>草稿，未出图</small></span><span><span class="owner">eikona</span></span><time>11-17 10:03</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+          </ul>
+        </section>
+
+        <div class="verbar">
+          <span class="lbl">版本</span>
+          <div class="vers" role="group" aria-label="基线版本">
+            <button class="ver-chip" aria-pressed="false">v1</button>
+            <button class="ver-chip" aria-pressed="false">v2</button>
+            <button class="ver-chip" aria-pressed="true">v3</button>
+          </div>
+          <span class="base">当前基线 <b>v3</b></span>
+          <span class="badge-warn"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-alert"/></svg>落后 1 版</span>
+          <span class="lbl why">剧本已更新到 r6，基线依据 r5</span>
+          <div class="push"><small><kbd>⇧↵</kbd></small><button class="btn btn-secondary"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compare"/></svg>并排对比</button></div>
+        </div>
+      </main>
+      <aside class="insp" aria-label="检查器">
+        <div class="insp-h"><h2>工具目录</h2><span class="sub">未选中元件</span></div>
+        <p class="insp-lead">可用性来自 capability.catalog。目录只负责打开生成台，不会直接提交或付费。</p>
+
+        <div class="grp">
+          <div class="grp-h"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg>现在能用<span class="n zero">0</span></div>
+          <p class="grp-empty">当前安装的 owner 能力都需要审批；先在「需要你批准」里选一项。</p>
+        </div>
+
+        <div class="grp">
+          <div class="grp-h"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clock"/></svg>需要你批准<span class="n">2</span></div>
+          <button class="tool"><span class="tn">出图 · 角色与场景<small>在生成台审批后运行</small></span><span class="owner">eikona</span><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></button>
+          <button class="tool"><span class="tn">音效生成<small>在生成台审批后运行</small></span><span class="owner">sonora</span><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></button>
+        </div>
+
+        <div class="grp">
+          <div class="grp-h"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-lock"/></svg>暂不可用<span class="n">8</span></div>
+          <div class="tool off"><span class="tn">分镜出图<small>缺少费用上限与幂等键</small></span><span class="owner">scaena</span></div>
+          <div class="tool off"><span class="tn">画面分析<small>缺少费用上限、幂等键与确认</small></span><span class="owner">anatomia</span></div>
+          <div class="tool off"><span class="tn">场次批量改写<small>owner 未提供费用上限</small></span><span class="owner">auctra</span></div>
+          <button class="more">另有 5 项不可用</button>
+        </div>
+
+        <div class="insp-foot"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-info"/></svg><span>不可用是安全边界：付费能力缺少费用上限或幂等键时，重复调用会造成真实损失。</span></div>
+      </aside>
+    </div>
+  </div>
+  </section>
+  <section class="board">
+    <div class="board-cap"><b>画布 B</b><span>选中主产物 · 检查器显示元件详情</span><span class="num">1440 × 900</span></div>
+  <div class="canvas">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-logo"/></svg></span>MuWeave</div>
+      <nav class="rooms" aria-label="房间">
+        <a class="room" aria-current="page">Overview</a>
+        <a class="room">Visual</a>
+        <a class="room">Script</a>
+        <a class="room">Production</a>
+        <a class="room">Draft</a>
+        <a class="room">Toolkit</a>
+        <a class="room">Schedule</a>
+      </nav>
+      <div class="top-actions">
+        <button class="cmdk"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg><span>搜索或运行命令</span><kbd>⌘K</kbd></button>
+        <button class="icon-btn" title="键位表 ?"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-help"/></svg></button>
+        <button class="icon-btn" title="切换检查器"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-panel"/></svg></button>
+        <button class="btn btn-secondary sm">生成台</button>
+      </div>
+    </header>
+    <div class="projbar">
+      <div class="proj-title">雨夜重逢 <span>· 第一集</span></div>
+      <span class="pill"><span class="dot"></span>准备中</span>
+      <div class="meta">
+        <span><b class="num">10</b> 元件</span><span class="sep"></span>
+        <span><b class="num">3</b> 待处理</span><span class="sep"></span>
+        <span class="warn-t"><span class="num">1</span> 基线落后</span>
+      </div>
+      <div class="proj-right"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sync"/></svg><span>已同步 <time>14:32</time></span></div>
+    </div>
+    <div class="body">
+      <aside class="rail" aria-label="阶段">
+        <div class="rail-h"><span>阶段</span><span class="num">3 / 4</span></div>
+        <a class="stage"><svg class="sdot done" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>灵感</span><span class="count zero">0</span></a>
+        <a class="stage"><svg class="sdot done" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>剧本</span><span class="count zero">0</span></a>
+        <a class="stage" aria-current="step"><svg class="sdot doing" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/><path class="half" d="M5 .75a4.25 4.25 0 0 1 0 8.5Z"/></svg><span>视觉</span><span class="count">3</span></a>
+        <a class="stage"><svg class="sdot todo" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>分镜</span><span class="count">1</span></a>
+        <div class="rail-div"></div>
+        <div class="stage off"><svg class="sdot na" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>声音</span><span class="count zero">—</span></div>
+        <div class="stage off"><svg class="sdot na" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4.25"/></svg><span>发布</span><span class="count zero">—</span></div>
+        <p class="rail-note">声音与发布暂无真实产物，接入数据后启用。</p>
+        <div class="rail-foot">
+          <kbd>J</kbd><span>下一阶段</span>
+          <kbd>K</kbd><span>上一阶段</span>
+          <kbd>G 1–4</kbd><span>跳到第 N 阶段</span>
+        </div>
+      </aside>
+      <main class="work">
+        <div class="work-h">
+          <h1>视觉</h1>
+          <div class="meta"><span><span class="num">4</span> 个元件</span><span class="sep"></span><span><span class="num">3</span> 待处理</span></div>
+          <div class="hints"><kbd>Tab</kbd><span>切换区域</span><kbd>↵</kbd><span>打开</span><kbd>⇧↵</kbd><span>对比基线</span></div>
+        </div>
+
+        <div class="top-row">
+          <section>
+            <div class="eyebrow">主产物</div>
+            <article class="l1 is-selected" tabindex="0">
+              <div class="thumb wide"><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="92" cy="34" r="11"/><path d="M68 90c0-20 10-34 24-34s24 14 24 34"/></svg><span class="spec">16:9 · 1536×864</span></div>
+              <div class="l1-body">
+                <div class="l1-title">沈岚 · 雨夜定妆</div>
+                <div class="l1-actions">
+                  <button class="btn btn-primary"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye"/></svg>审阅</button>
+                  <button class="btn btn-secondary"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compare"/></svg>对比基线</button>
+                </div>
+                <div class="l1-status"><span class="dot warn-t"></span>采用变体 v3·b，等待你审阅后设为基线</div>
+              </div>
+            </article>
+          </section>
+
+          <section class="side">
+            <div class="eyebrow">变体 <span class="num">3</span><span class="end">同一轮 v3 的候选</span></div>
+            <div class="l2">
+              <div class="variant"><div class="thumb "><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="60" cy="34" r="11"/><path d="M36 90c0-20 10-34 24-34s24 14 24 34"/></svg><span class="ver">v3·a</span></div><div class="cap">偏冷 · 远景</div></div>
+              <div class="variant is-on"><div class="thumb "><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="92" cy="34" r="11"/><path d="M68 90c0-20 10-34 24-34s24 14 24 34"/></svg><span class="ver">v3·b</span></div><div class="cap">已采用</div></div>
+              <div class="variant"><div class="thumb "><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="110" cy="34" r="11"/><path d="M86 90c0-20 10-34 24-34s24 14 24 34"/></svg><span class="ver">v3·c</span></div><div class="cap">逆光 · 近景</div></div>
+            </div>
+            <dl class="kv">
+              <div class="kv-row"><dt>owner</dt><dd><span class="owner">eikona</span></dd></div>
+              <div class="kv-row"><dt>类型</dt><dd>角色定妆 · character_master</dd></div>
+              <div class="kv-row"><dt>审阅</dt><dd class="warn-t">待审阅</dd></div>
+              <div class="kv-row"><dt>依据</dt><dd>剧本 第 12 场 <span class="warn-t">· r5（最新 r6）</span></dd></div>
+            </dl>
+          </section>
+        </div>
+
+        <section class="l3">
+          <div class="eyebrow">待办 <span class="num">3</span><span class="end">按到达时间</span></div>
+          <ul class="q">
+            <li class="q-row"><span class="ic"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye"/></svg></span><span class="name">审阅「沈岚 · 雨夜定妆」v3 候选<small>3 个变体</small></span><span><span class="owner">eikona</span></span><time>11-19 14:20</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+            <li class="q-row"><span class="ic warn-t"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-alert"/></svg></span><span class="name">分镜 S03 引用旧基线 v2，需要重新绑定<small>落后 1 版</small></span><span><span class="owner">scaena</span></span><time>11-19 13:05</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+            <li class="q-row"><span class="ic"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-doc"/></svg></span><span class="name">确认生成计划「雨夜街景 · 三机位」<small>Plan</small></span><span><span class="owner">pi</span></span><time>11-18 22:40</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+          </ul>
+        </section>
+
+        <section class="l3">
+          <div class="eyebrow">本阶段其他元件 <span class="num">3</span><span class="end">L3 · 点开在检查器查看</span></div>
+          <ul class="q">
+            <li class="q-row"><span class="ic ok-t"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span><span class="name">林舟 · 雨夜定妆<small>基线 v2</small></span><span><span class="owner">eikona</span></span><time>11-18 19:12</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+            <li class="q-row"><span class="ic ok-t"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span><span class="name">雨夜街口 · 场景母版<small>基线 v4</small></span><span><span class="owner">eikona</span></span><time>11-18 16:47</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+            <li class="q-row"><span class="ic"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clock"/></svg></span><span class="name">道具 · 黑伞<small>草稿，未出图</small></span><span><span class="owner">eikona</span></span><time>11-17 10:03</time><span class="go"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></span></li>
+          </ul>
+        </section>
+
+        <div class="verbar">
+          <span class="lbl">版本</span>
+          <div class="vers" role="group" aria-label="基线版本">
+            <button class="ver-chip" aria-pressed="false">v1</button>
+            <button class="ver-chip" aria-pressed="false">v2</button>
+            <button class="ver-chip" aria-pressed="true">v3</button>
+          </div>
+          <span class="base">当前基线 <b>v3</b></span>
+          <span class="badge-warn"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-alert"/></svg>落后 1 版</span>
+          <span class="lbl why">剧本已更新到 r6，基线依据 r5</span>
+          <div class="push"><small><kbd>⇧↵</kbd></small><button class="btn btn-secondary"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compare"/></svg>并排对比</button></div>
+        </div>
+      </main>
+      <aside class="insp" aria-label="检查器">
+        <div class="insp-h"><span class="sub">已选中 · 主产物</span><button class="icon-btn" title="取消选中 Esc"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+        <div class="thumb wide el-prev"><svg class="thirds" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true"><line x1="1" y1="0" x2="1" y2="3"/><line x1="2" y1="0" x2="2" y2="3"/><line x1="0" y1="1" x2="3" y2="1"/><line x1="0" y1="2" x2="3" y2="2"/></svg><svg class="fig" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="92" cy="34" r="11"/><path d="M68 90c0-20 10-34 24-34s24 14 24 34"/></svg></div>
+        <div class="el-title">沈岚 · 雨夜定妆</div>
+        <div class="el-line"><span class="dot warn-t"></span><span class="warn-t">待审阅</span><span>·</span><span>v3·b</span><span>·</span><time>11-19 14:20</time></div>
+
+        <dl class="kv el-kv">
+          <div class="kv-row"><dt>owner</dt><dd><span class="owner">eikona</span></dd></div>
+          <div class="kv-row"><dt>kind</dt><dd>character_master</dd></div>
+          <div class="kv-row"><dt>digest</dt><dd><span class="digest" title="sha256:9f3c1a7e…e07b">sha256:9f3c1a7e…e07b</span><button class="copy" title="复制 digest"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy"/></svg></button></dd></div>
+          <div class="kv-row"><dt>尺寸</dt><dd class="num">1536 × 864</dd></div>
+          <div class="kv-row"><dt>基线</dt><dd>v3 <span class="warn-t">· 落后 1 版</span></dd></div>
+        </dl>
+
+        <div class="el-actions">
+          <button class="btn btn-primary block"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-open"/></svg>在生成台打开</button>
+          <button class="btn btn-secondary block"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compare"/></svg>并排对比</button>
+          <p class="note">打开生成台只创建待审批请求，不会直接提交。</p>
+        </div>
+
+        <div class="refs">
+          <div class="eyebrow">被引用 <span class="num">2</span></div>
+          <div class="ref first"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-link"/></svg><span class="rn">分镜 S03 · 雨夜街口</span><span class="warn-t small">用 v2</span></div>
+          <div class="ref"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-link"/></svg><span class="rn">剧本 第 12 场 · 重逢</span><span class="owner">auctra</span></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+  </section>
+</div>
+</body>
+</html>
