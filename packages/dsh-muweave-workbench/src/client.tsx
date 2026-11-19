@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   CompanionList,
   CoverCollage,
@@ -11,6 +11,7 @@ import {
   Poster,
   RoomHero,
   SectionHead,
+  Segmented,
   ShotGenerateButton,
   ShotMedia,
   StatusTag,
@@ -34,6 +35,9 @@ import {
   type OwnerReadinessState,
 } from '@yeisme/dsh-muweave-core/client'
 import { ProjectPanel, type ProjectRow } from './project-panel'
+import { StageAxis } from './stage-axis'
+import { StageWorkbench } from './stage-workbench'
+import { defaultStage, groupByStage, type StageId } from './stage-map'
 import { toolCatalogIntent, useToolCatalog, type ToolCatalogEntry } from '@yeisme/dsh-muweave-core/client'
 
 export const name = '@yeisme/dsh-muweave-workbench'
@@ -97,6 +101,9 @@ const zh = {
   draftObstacle: '阻碍',
   draftTurn: '转折',
   draftSeconds: '秒',
+  viewLabel: '总览视图',
+  viewByStage: '按阶段',
+  viewAll: '全部',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -153,6 +160,9 @@ const en: Record<keyof typeof zh, string> = {
   draftObstacle: 'Obstacle',
   draftTurn: 'Turn',
   draftSeconds: 's',
+  viewLabel: 'Overview view',
+  viewByStage: 'By stage',
+  viewAll: 'All',
 }
 
 export function WorkbenchIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -196,6 +206,10 @@ export function WorkbenchMainPage({
   const [activeProject, setActiveProject] = useState<ProjectRow | undefined>(undefined)
   /** True when the selected project has no elements of its own yet (showing the workspace fallback). */
   const [projectUnclaimed, setProjectUnclaimed] = useState(false)
+  /** Desk v8: the Overview tab leads with the stage axis; the masonry stays one toggle away as 「全部」. */
+  const [overviewMode, setOverviewMode] = useState<'stage' | 'all'>('stage')
+  /** Undefined until the user picks one, so the default follows the data as it loads. */
+  const [pickedStage, setPickedStage] = useState<StageId | undefined>(undefined)
   const lang = coreT('langCode')
   const covers = useProjectCovers(rpc, 3)
 
@@ -206,24 +220,25 @@ export function WorkbenchMainPage({
     }>('bundle.elements.list', { ...(domainFilter === 'all' ? {} : { domain: domainFilter }), ...(activeProject ? { projectId: activeProject.id } : {}) })
     // A freshly created project usually has no elements tagged with its id yet. Blanking the room
     // there reads as data loss, so fall back to the workspace projection and flag it as unclaimed.
-    if (activeProject && res.ok && res.data.elements.length === 0) {
+    if (activeProject && res.ok && (res.data?.elements ?? []).length === 0) {
       const fallback = await rpc.call<{
         elements: MuweaveElementSummaryV1[]
         ownerStates?: Record<string, OwnerReadinessState>
       }>('bundle.elements.list', { ...(domainFilter === 'all' ? {} : { domain: domainFilter }) })
-      if (fallback.ok && fallback.data.elements.length > 0) {
+      if (fallback.ok && (fallback.data?.elements ?? []).length > 0) {
         setElements(fallback.data.elements)
         setProjectUnclaimed(true)
-        setOwnerStates(fallback.data.ownerStates ?? {})
+        setOwnerStates(fallback.data?.ownerStates ?? {})
         publishKnownElementsForTriggers(fallback.data.elements)
         return
       }
     }
     setProjectUnclaimed(false)
     if (res.ok) {
-      setElements(res.data.elements)
-      setOwnerStates(res.data.ownerStates ?? {})
-      publishKnownElementsForTriggers(res.data.elements)
+      const list = res.data?.elements ?? []
+      setElements(list)
+      setOwnerStates(res.data?.ownerStates ?? {})
+      publishKnownElementsForTriggers(list)
     }
   }, [rpc, domainFilter, activeProject])
 
@@ -356,6 +371,43 @@ export function WorkbenchMainPage({
       </Masonry>
     )
   }
+
+  const stageGroups = useMemo(() => groupByStage(elements), [elements])
+  const currentStage = pickedStage ?? defaultStage(stageGroups)
+  const overviewToggle = (
+    <Segmented<'stage' | 'all'>
+      label={t('viewLabel')}
+      value={overviewMode}
+      onChange={setOverviewMode}
+      options={[
+        { value: 'stage', label: t('viewByStage') },
+        { value: 'all', label: t('viewAll') },
+      ]}
+    />
+  )
+  const renderOverview = (onPinCompare: (node: ReactNode) => void) =>
+    overviewMode === 'stage' ? (
+      <div className="mw-stage-overview" data-muweave-overview-mode="stage">
+        <div className="mw-stage-toolbar">{overviewToggle}</div>
+        <div className="mw-stage-layout">
+          <StageAxis groups={stageGroups} current={currentStage} onSelect={setPickedStage} lang={lang} />
+          <StageWorkbench
+            rpc={rpc}
+            stage={currentStage}
+            rows={stageGroups[currentStage]}
+            lang={lang}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onPinCompare={onPinCompare}
+          />
+        </div>
+      </div>
+    ) : (
+      <div className="mw-stage-overview" data-muweave-overview-mode="all">
+        <div className="mw-stage-toolbar">{overviewToggle}</div>
+        {renderElementCards(elements, onPinCompare, nextStepCard)}
+      </div>
+    )
 
   const piItems = elements.filter((e) => e.sourceOwner === 'pi')
   const dshItems = elements.filter((e) => e.sourceOwner === 'dsh')
@@ -564,7 +616,7 @@ export function WorkbenchMainPage({
         {
           id: 'overview',
           label: () => t('tabOverview'),
-          render: ({ onPinCompare }) => renderElementCards(elements, onPinCompare, nextStepCard),
+          render: ({ onPinCompare }) => renderOverview(onPinCompare),
         },
         {
           id: 'pi-artifacts',

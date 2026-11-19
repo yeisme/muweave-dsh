@@ -3403,6 +3403,616 @@ body[data-ds-dark-theme] .mw-ambient > i {
     transform: none;
   }
 }
+
+/* Desk v8 Overview: stage axis + three-level stage workbench (docs/design/mockup-v8.html). */
+.mw-stage-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-3);
+  min-width: 0;
+}
+
+.mw-stage-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mw-stage-layout {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  min-height: 0;
+  border-radius: var(--mw-r-3);
+  box-shadow: 0 0 0 1px var(--mw-line);
+  background: var(--mw-card);
+  overflow: hidden;
+}
+
+.mw-stage-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-stage-axis {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0;
+  background: var(--mw-fill-1);
+  border-right: 1px solid var(--mw-line);
+  min-width: 0;
+}
+
+.mw-stage-axis-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 2rem;
+  padding: 0 1rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-axis-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mw-stage-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  height: 2rem;
+  padding: 0 1rem;
+  border: 0;
+  background: transparent;
+  color: var(--mw-label);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--mw-dur-fast) var(--mw-ease);
+}
+
+.mw-stage-row:hover {
+  background: var(--mw-fill-1);
+}
+
+.mw-stage-row[data-current="true"] {
+  background: var(--mw-fill-2);
+  font-weight: 600;
+}
+
+.mw-stage-row[data-current="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--mw-accent);
+}
+
+.mw-stage-row[data-empty="true"] {
+  color: var(--mw-label-3);
+}
+
+.mw-stage-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Primary number: pending (actionable). Secondary: total, quieter and one step smaller (§8.3). */
+.mw-stage-pending {
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: var(--mw-label);
+}
+
+.mw-stage-pending[data-zero="true"] {
+  color: var(--mw-label-3);
+}
+
+.mw-stage-total {
+  min-width: 1.25rem;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  flex: none;
+  stroke-width: 1.5;
+  fill: none;
+  stroke: var(--mw-line-strong);
+}
+
+.mw-stage-dot[data-state="done"] {
+  fill: var(--mw-ok);
+  stroke: var(--mw-ok);
+}
+
+.mw-stage-dot[data-state="doing"] {
+  stroke: var(--mw-label);
+}
+
+.mw-stage-dot-half {
+  fill: var(--mw-label);
+  stroke: none;
+}
+
+.mw-stage-axis-note {
+  margin: 0.5rem 0 0;
+  padding: 0 1rem;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-axis-keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.375rem 0.5rem;
+  align-items: center;
+  margin: auto 0 0;
+  padding: 0.75rem 1rem 0.25rem;
+  border-top: 1px solid var(--mw-line);
+  font-size: 0.6875rem;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-axis-keys dt,
+.mw-stage-axis-keys dd {
+  margin: 0;
+}
+
+.mw-stage-axis kbd,
+.mw-stage-work-hints kbd {
+  font-family: inherit;
+  font-size: 0.6875rem;
+  line-height: 1;
+  padding: 0.1875rem 0.3125rem;
+  border-radius: var(--mw-r-1);
+  background: var(--mw-surface);
+  color: var(--mw-label-2);
+  box-shadow: 0 0 0 1px var(--mw-line-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-stage-work {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1rem 1.5rem 0;
+}
+
+.mw-stage-work-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-height: 2.5rem;
+}
+
+.mw-stage-work-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mw-stage-work-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--mw-label-2);
+}
+
+.mw-stage-work-meta b {
+  font-weight: 600;
+  color: var(--mw-label);
+}
+
+.mw-stage-sep {
+  width: 1px;
+  height: 0.75rem;
+  background: var(--mw-line-strong);
+}
+
+.mw-stage-work-hints {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-inline-start: auto;
+  font-size: 0.6875rem;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-top {
+  display: grid;
+  /* Two columns only when there is room for both. A fixed 30rem hero leaves the metadata column a
+     sliver at typical stage widths, and the card clips it. auto-fit drops to one column instead. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.mw-stage-level {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mw-stage-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-eyebrow .mw-stage-num {
+  color: var(--mw-label-2);
+}
+
+.mw-stage-eyebrow-end {
+  margin-inline-start: auto;
+  font-weight: 400;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mw-stage-primary {
+  border-radius: var(--mw-r-3);
+  background: var(--mw-surface);
+  box-shadow: 0 0 0 1px var(--mw-line), var(--mw-elev-1);
+  overflow: hidden;
+}
+
+.mw-stage-primary[data-current="true"] {
+  box-shadow: 0 0 0 2px var(--mw-accent), var(--mw-elev-1);
+}
+
+.mw-stage-thumb {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--mw-fill-2);
+}
+
+.mw-stage-thumb[data-empty="true"] {
+  background-image: linear-gradient(var(--mw-line) 1px, transparent 1px), linear-gradient(90deg, var(--mw-line) 1px, transparent 1px);
+  background-size: 1.5rem 1.5rem;
+  background-position: -1px -1px;
+}
+
+.mw-stage-thumb[data-shape="wide"] {
+  /* Cap the hero thumbnail: at full stage width a 16:9 box swallows half the screen and pushes
+     the inspector out. The design draft puts L1 and its metadata side by side, not stacked. */
+  aspect-ratio: 16 / 9;
+  max-height: 11rem;
+}
+
+.mw-stage-thumb[data-shape="variant"] {
+  width: 7.5rem;
+  height: 5.625rem;
+  border-radius: var(--mw-r-2);
+  box-shadow: inset 0 0 0 1px var(--mw-line);
+}
+
+.mw-stage-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mw-stage-thumb-note {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--mw-r-1);
+  background: var(--mw-surface);
+  box-shadow: 0 0 0 1px var(--mw-line);
+  font-size: 0.6875rem;
+  color: var(--mw-label-2);
+}
+
+.mw-stage-primary-body {
+  display: grid;
+  /* One column by default: the workbench is narrow (stage minus axis), and a trailing auto column
+     for metadata gets clipped at the right edge. Metadata wraps under the actions instead. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.375rem;
+  align-items: center;
+  padding: 0.75rem 1rem 0.875rem;
+}
+
+.mw-stage-primary-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mw-stage-primary-actions {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.mw-stage-primary-status {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+  color: var(--mw-label-2);
+}
+
+.mw-stage-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.mw-stage-variants {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+}
+
+.mw-stage-variant {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 7.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.mw-stage-variant[data-current="true"] .mw-stage-thumb {
+  box-shadow: 0 0 0 2px var(--mw-accent);
+}
+
+.mw-stage-variant-tag {
+  position: absolute;
+  right: 0.3125rem;
+  bottom: 0.3125rem;
+  padding: 0 0.25rem;
+  border-radius: var(--mw-r-1);
+  background: var(--mw-surface);
+  font-size: 0.625rem;
+  line-height: 1rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--mw-label-2);
+}
+
+.mw-stage-variant[data-current="true"] .mw-stage-variant-tag {
+  color: var(--mw-accent);
+  font-weight: 600;
+}
+
+.mw-stage-variant-cap {
+  font-size: 0.6875rem;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-kv {
+  margin: 0;
+}
+
+.mw-stage-kv > div {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
+  border-top: 1px solid var(--mw-line);
+}
+
+.mw-stage-kv > div:last-child {
+  border-bottom: 1px solid var(--mw-line);
+}
+
+.mw-stage-kv dt {
+  width: 5rem;
+  flex: none;
+  color: var(--mw-label-2);
+}
+
+.mw-stage-kv dd {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mw-stage-owner {
+  display: inline-flex;
+  align-items: center;
+  height: 1.125rem;
+  padding: 0 0.375rem;
+  border-radius: var(--mw-r-1);
+  background: var(--mw-fill-2);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--mw-label-2);
+}
+
+.mw-stage-queue {
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--mw-line);
+}
+
+.mw-stage-queue-row {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr) auto 6.5rem 1rem;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0 0.5rem;
+  border: 0;
+  border-bottom: 1px solid var(--mw-line);
+  background: transparent;
+  color: var(--mw-label);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--mw-dur-fast) var(--mw-ease);
+}
+
+.mw-stage-queue-row:hover,
+.mw-stage-queue-row[data-current="true"] {
+  background: var(--mw-fill-1);
+}
+
+.mw-stage-queue-icon,
+.mw-stage-queue-go {
+  display: grid;
+  place-items: center;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-queue-icon[data-tone="warn"] {
+  color: var(--mw-warn);
+}
+
+.mw-stage-queue-icon[data-tone="ok"] {
+  color: var(--mw-ok);
+}
+
+.mw-stage-queue-go .mw-ic {
+  transform: rotate(-90deg);
+}
+
+.mw-stage-queue-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mw-stage-queue-name small {
+  margin-inline-start: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--mw-label-3);
+}
+
+.mw-stage-queue-row time {
+  font-size: 0.75rem;
+  text-align: end;
+  color: var(--mw-label-2);
+}
+
+.mw-stage-quiet {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--mw-label-2);
+}
+
+.mw-stage-versions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.25rem;
+  margin-top: auto;
+  border-top: 1px solid var(--mw-line);
+  font-size: 0.8125rem;
+}
+
+.mw-stage-version-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  border-radius: var(--mw-r-2);
+  background: var(--mw-surface);
+  box-shadow: 0 0 0 1px var(--mw-line), var(--mw-elev-1);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-stage-versions b {
+  font-weight: 600;
+}
+
+.mw-stage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.375rem;
+  padding: 0 0.5rem;
+  border-radius: var(--mw-r-pill);
+  box-shadow: inset 0 0 0 1px var(--mw-line-strong);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--mw-warn);
+}
+
+.mw-stage-versions-end {
+  margin-inline-start: auto;
+}
+
+@media (max-width: 64rem) {
+  .mw-stage-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 48rem) {
+  .mw-stage-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mw-stage-axis {
+    border-right: 0;
+    border-bottom: 1px solid var(--mw-line);
+  }
+
+  .mw-stage-axis-keys {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mw-stage-row,
+  .mw-stage-queue-row {
+    transition: none;
+  }
+}
 `
 
 interface SharedStyleHolder {
