@@ -4404,6 +4404,169 @@ body[data-ds-dark-theme] .mw-ambient > i {
     transform: none;
   }
 }
+
+/* ---------- F1: binding inspector and derived groups (docs/design/project-features-next.md F1) ----------
+   Hairline-separated rows on the project popover's glass, no new colours; the state pill borrows the
+   shared tone map. Both surfaces enter with mw-fade-in; the global reduced-motion rule stops them. */
+
+.mw-bind {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+  padding-top: var(--mw-s-3);
+  border-top: 1px solid var(--mw-line);
+  animation: mw-fade-in 180ms var(--mw-ease-out) both;
+}
+
+.mw-bind-head,
+.mw-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mw-s-2);
+}
+
+.mw-bind-count,
+.mw-group-count {
+  color: var(--mw-label-3);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-bind-empty {
+  padding: var(--mw-s-2) 0;
+}
+
+.mw-bind-list,
+.mw-bind-refs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mw-bind-list {
+  border-radius: var(--mw-r-2);
+  box-shadow: inset 0 0 0 1px var(--mw-line);
+}
+
+.mw-bind-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-1);
+  padding: var(--mw-s-1) var(--mw-s-2);
+}
+
+.mw-bind-row + .mw-bind-row {
+  border-top: 1px solid var(--mw-line);
+}
+
+.mw-bind-line,
+.mw-bind-ref,
+.mw-bind-actions,
+.mw-bind-confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-2);
+  min-height: 2rem;
+  min-width: 0;
+}
+
+.mw-bind-ws {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mw-mono);
+  font-size: 0.75rem;
+}
+
+.mw-bind-time {
+  color: var(--mw-label-3);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mw-bind-owner {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-bind-refs {
+  padding-left: var(--mw-s-2);
+  border-left: 1px solid var(--mw-line);
+}
+
+.mw-bind-ref-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mw-mono);
+  font-size: 0.75rem;
+  color: var(--mw-label-2);
+}
+
+.mw-bind-form {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.mw-bind-form > .mw-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mw-mono);
+}
+
+.mw-bind-actions,
+.mw-bind-confirm {
+  justify-content: flex-end;
+}
+
+.mw-bind-confirm {
+  flex-wrap: wrap;
+  padding: var(--mw-s-1) var(--mw-s-2);
+  border-radius: var(--mw-r-2);
+  background: var(--mw-fill-1);
+}
+
+.mw-bind-error {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-2);
+  flex-wrap: wrap;
+  padding: var(--mw-s-2);
+  border-radius: var(--mw-r-2);
+  background: color-mix(in oklch, var(--mw-bad) 10%, transparent);
+  font-size: 0.75rem;
+}
+
+.mw-group-bar {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.mw-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-5);
+  animation: mw-fade-in var(--mw-dur-fast) var(--mw-ease-out) both;
+}
+
+.mw-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+}
+
+.mw-group-head {
+  padding-bottom: var(--mw-s-1);
+  border-bottom: 1px solid var(--mw-line);
+}
 `
 
 interface SharedStyleHolder {

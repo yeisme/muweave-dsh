@@ -20,6 +20,7 @@ import {
   openGeneration,
   useGenerationStore,
   shotDescription,
+  statusLabel,
   statusTone,
   useProjectCovers,
   type LinkedMediaRef,
@@ -38,7 +39,17 @@ import { ProjectPanel, type ProjectRow } from './project-panel'
 import { StageAxis } from './stage-axis'
 import { StageWorkbench } from './stage-workbench'
 import { ComparePaneSlot } from './compare-pane'
-import { defaultStage, elementSubject, groupByStage, pickPrimary, type CompareSubject, type StageId } from './stage-map'
+import {
+  UNLABELED_GROUP,
+  defaultStage,
+  elementSubject,
+  groupByStage,
+  groupElements,
+  pickPrimary,
+  type CompareSubject,
+  type ElementGroupBy,
+  type StageId,
+} from './stage-map'
 import { toolCatalogIntent, useToolCatalog, type ToolCatalogEntry } from '@yeisme/dsh-muweave-core/client'
 
 export const name = '@yeisme/dsh-muweave-workbench'
@@ -106,6 +117,13 @@ const zh = {
   viewLabel: '总览视图',
   viewByStage: '按阶段',
   viewAll: '全部',
+  groupLabel: '元件分组',
+  groupNone: '不分组',
+  groupScene: '场次',
+  groupCharacter: '角色',
+  groupStatus: '状态',
+  groupMedia: '素材',
+  groupUnlabeled: '未标注',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -166,6 +184,13 @@ const en: Record<keyof typeof zh, string> = {
   viewLabel: 'Overview view',
   viewByStage: 'By stage',
   viewAll: 'All',
+  groupLabel: 'Group elements',
+  groupNone: 'None',
+  groupScene: 'Scene',
+  groupCharacter: 'Character',
+  groupStatus: 'Status',
+  groupMedia: 'Media',
+  groupUnlabeled: 'Unlabeled',
 }
 
 export function WorkbenchIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -213,6 +238,8 @@ export function WorkbenchMainPage({
   const [overviewMode, setOverviewMode] = useState<'stage' | 'all'>('stage')
   /** Undefined until the user picks one, so the default follows the data as it loads. */
   const [pickedStage, setPickedStage] = useState<StageId | undefined>(undefined)
+  /** F1: a view-only projection of the elements in hand; switching it never calls the host. */
+  const [groupBy, setGroupBy] = useState<'none' | ElementGroupBy>('none')
   const lang = coreT('langCode')
   const covers = useProjectCovers(rpc, 3)
   /** Desk v8 P1: the pinned compare side as data; the shell slot only holds a bound <ComparePaneSlot />. */
@@ -427,6 +454,22 @@ export function WorkbenchMainPage({
       ]}
     />
   )
+  const groupToggle = (
+    <Segmented<'none' | ElementGroupBy>
+      label={t('groupLabel')}
+      value={groupBy}
+      onChange={setGroupBy}
+      options={[
+        { value: 'none', label: t('groupNone') },
+        { value: 'scene', label: t('groupScene') },
+        { value: 'character', label: t('groupCharacter') },
+        { value: 'status', label: t('groupStatus') },
+        { value: 'media', label: t('groupMedia') },
+      ]}
+    />
+  )
+  const groupTitle = (key: string, label: string) =>
+    key === UNLABELED_GROUP ? t('groupUnlabeled') : groupBy === 'status' ? statusLabel(key, lang) : label
   const renderOverview = (onPinCompare: (node: ReactNode) => void) =>
     overviewMode === 'stage' ? (
       <div className="mw-stage-overview" data-muweave-overview-mode="stage">
@@ -450,7 +493,23 @@ export function WorkbenchMainPage({
     ) : (
       <div className="mw-stage-overview" data-muweave-overview-mode="all">
         <div className="mw-stage-toolbar">{overviewToggle}</div>
-        {renderElementCards(elements, onPinCompare, nextStepCard)}
+        <div className="mw-group-bar" data-element-group-bar="true">{groupToggle}</div>
+        {groupBy === 'none' || elements.length === 0 ? (
+          renderElementCards(elements, onPinCompare, nextStepCard)
+        ) : (
+          // Re-keyed per dimension so the regrouped list fades in once.
+          <div key={groupBy} className="mw-group-list" data-element-group-by={groupBy}>
+            {groupElements(elements, groupBy).map((group) => (
+              <section key={group.key} className="mw-group" data-element-group={group.key}>
+                <header className="mw-group-head">
+                  <span className="mw-eyebrow">{groupTitle(group.key, group.label)}</span>
+                  <span className="mw-group-count">{group.rows.length}</span>
+                </header>
+                {renderElementCards(group.rows, onPinCompare)}
+              </section>
+            ))}
+          </div>
+        )}
       </div>
     )
 

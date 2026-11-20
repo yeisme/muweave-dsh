@@ -121,6 +121,19 @@ function normalizeProject(raw: unknown): ProjectRecordV1 | undefined {
         .filter((binding): binding is ProjectOwnerBindingV1 => Boolean(binding))
         .slice(0, MAX_PROJECT_BINDINGS)
     : [];
+  const revisions =
+    typeof value.lastObservedRevisions === "object" &&
+    value.lastObservedRevisions !== null &&
+    !Array.isArray(value.lastObservedRevisions)
+      ? Object.fromEntries(
+          Object.entries(value.lastObservedRevisions).filter(
+            ([key, revision]) =>
+              SAFE_REF_RE.test(key) &&
+              typeof revision === "string" &&
+              SAFE_REF_RE.test(revision),
+          ),
+        )
+      : undefined;
   return {
     id: value.id,
     title: value.title.trim(),
@@ -129,6 +142,9 @@ function normalizeProject(raw: unknown): ProjectRecordV1 | undefined {
     ownerBindings: bindings,
     createdAt,
     updatedAt,
+    ...(revisions && Object.keys(revisions).length > 0
+      ? { lastObservedRevisions: revisions }
+      : {}),
     ...(typeof value.coverRef === "string" && SAFE_REF_RE.test(value.coverRef)
       ? { coverRef: value.coverRef }
       : {}),
@@ -146,6 +162,7 @@ export class ProjectInputError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -368,6 +385,8 @@ export class ProjectStore {
     workspaceId: string;
     owner: ProjectOwnerBindingV1["owner"];
     refs: string[];
+    expectedRevision?: string;
+    workspaceRegistered?: boolean;
     bindingState?: ProjectOwnerBindingV1["bindingState"];
   }): { project: ProjectRecordV1; binding: ProjectOwnerBindingV1 } {
     const project = this.require(input.projectId);
@@ -375,6 +394,32 @@ export class ProjectStore {
       throw new ProjectInputError(
         "muweave/project_archived",
         "Archived project must be restored first",
+      );
+    if (input.workspaceRegistered === false)
+      throw new ProjectInputError(
+        "muweave/workspace_unknown",
+        "Workspace is not registered",
+      );
+    if (
+      input.owner !== "eikona" &&
+      input.owner !== "auctra" &&
+      input.owner !== "scaena" &&
+      input.owner !== "pi"
+    )
+      throw new ProjectInputError(
+        "muweave/invalid_owner_ref",
+        "Owner binding is invalid",
+      );
+    if (
+      !Array.isArray(input.refs) ||
+      input.refs.length === 0 ||
+      input.refs.some(
+        (ref) => typeof ref !== "string" || !SAFE_REF_RE.test(ref.trim()),
+      )
+    )
+      throw new ProjectInputError(
+        "muweave/invalid_owner_ref",
+        "Owner binding refs are invalid",
       );
     const binding = normalizeOwnerBinding({
       workspaceId: input.workspaceId,
@@ -387,6 +432,14 @@ export class ProjectStore {
         "muweave/invalid_owner_ref",
         "Owner binding is invalid",
       );
+    const revisionKey = `${input.workspaceId}/${input.owner}`;
+    const actual = project.lastObservedRevisions?.[revisionKey];
+    if (input.expectedRevision !== undefined && input.expectedRevision !== actual)
+      throw new ProjectInputError(
+        "muweave/revision_conflict",
+        "Workspace owner revision changed since it was loaded",
+        { expected: input.expectedRevision, actual: actual ?? null },
+      );
     const ownerBindings = project.ownerBindings.filter(
       (item) =>
         !(
@@ -395,13 +448,21 @@ export class ProjectStore {
         ),
     );
     ownerBindings.push(binding);
-    const updated = {
+    const updated: ProjectRecordV1 = {
       ...project,
       ownerBindings,
       workspaceRefs: [
         ...new Set([...project.workspaceRefs, input.workspaceId]),
       ],
       updatedAt: new Date().toISOString(),
+      ...(input.expectedRevision === undefined
+        ? {}
+        : {
+            lastObservedRevisions: {
+              ...(project.lastObservedRevisions ?? {}),
+              [revisionKey]: input.expectedRevision,
+            },
+          }),
     };
     this.replace(updated);
     this.persist();
@@ -412,41 +473,42 @@ export class ProjectStore {
     workspaceId: string;
     owner: ProjectOwnerBindingV1["owner"];
     refs?: string[];
-  }): { project: ProjectRecordV1; binding: ProjectOwnerBindingV1 } {
+  }): { project: ProjectRecordV1; removed: boolean } {
     const project = this.require(input.projectId);
-    const existing = project.ownerBindings.find(
-      (item) =>
-        item.workspaceId === input.workspaceId && item.owner === input.owner,
-    );
-    if (!existing)
+    if (!input.workspaceId)
       throw new ProjectInputError(
-        "muweave/owner_binding_not_found",
-        "Owner binding not found",
+        "muweave/workspace_unknown",
+        "Workspace is required",
       );
-    const refs = input.refs?.length
-      ? new Set(input.refs)
-      : new Set(existing.refs);
-    const remaining = existing.refs.filter((ref) => !refs.has(ref));
-    const binding = {
-      ...existing,
-      refs: remaining,
-      bindingState: remaining.length
-        ? existing.bindingState
-        : ("unavailable" as const),
-      updatedAt: new Date().toISOString(),
-    };
+    if (
+      input.owner !== "eikona" &&
+      input.owner !== "auctra" &&
+      input.owner !== "scaena" &&
+      input.owner !== "pi"
+    )
+      throw new ProjectInputError(
+        "muweave/invalid_owner_ref",
+        "Owner binding is invalid",
+      );
+    // Unbinding only removes the registry binding record. It never touches the bundle or owner originals.
     const ownerBindings = project.ownerBindings.filter(
-      (item) => item !== existing,
+      (item) =>
+        !(
+          item.workspaceId === input.workspaceId &&
+          item.owner === input.owner
+        ),
     );
-    if (binding.refs.length > 0) ownerBindings.push(binding);
-    const updated = {
+    if (ownerBindings.length === project.ownerBindings.length)
+      return { project, removed: false };
+    const updated: ProjectRecordV1 = {
       ...project,
       ownerBindings,
+      // workspaceRefs is project scope, not a binding-derived field; never prune it here.
       updatedAt: new Date().toISOString(),
     };
     this.replace(updated);
     this.persist();
-    return { project: updated, binding };
+    return { project: updated, removed: true };
   }
   activate(projectId: string): ProjectRecordV1 {
     const project = this.require(projectId);

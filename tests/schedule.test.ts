@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { CreatorHostService } from '@yeisme/dsh-muweave-core'
@@ -236,9 +236,17 @@ describe('project bind writes durable owner bindings', () => {
       if (!listed.ok) throw new Error('list failed')
       expect((listed.data as { activeProjectId?: string }).activeProjectId).toBe(project.id)
 
+      await mkdir(path.join(ws, 'ws-alpha'), { recursive: true })
+      const registered = await svc.handleRpcAction('workspace.register', {
+        workspaceDir: path.join(ws, 'ws-alpha'),
+        label: 'alpha',
+      })
+      if (!registered.ok) throw new Error('register failed: ' + registered.error.code)
+      const alphaId = (registered.data as { workspace: { workspaceId: string } }).workspace.workspaceId
+
       const bound = await svc.handleRpcAction('project.bind', {
         projectId: project.id,
-        workspaceId: 'ws_alpha',
+        workspaceId: alphaId,
         owner: 'eikona',
         refs: ['run_0001'],
       })
@@ -255,8 +263,8 @@ describe('project bind writes durable owner bindings', () => {
       const stored = onDisk.projects.find((row) => row.id === project.id)
       expect(stored).toBeTruthy()
       expect(stored?.ownerBindings).toHaveLength(1)
-      expect(stored?.ownerBindings[0]).toMatchObject({ owner: 'eikona', workspaceId: 'ws_alpha', refs: ['run_0001'] })
-      expect(stored?.workspaceRefs).toContain('ws_alpha')
+      expect(stored?.ownerBindings[0]).toMatchObject({ owner: 'eikona', workspaceId: alphaId, refs: ['run_0001'] })
+      expect(stored?.workspaceRefs).toContain(alphaId)
       svc.dispose()
     } finally {
       await rm(ws, { recursive: true, force: true })
@@ -271,8 +279,12 @@ describe('project bind writes durable owner bindings', () => {
       if (!created.ok) throw new Error('create failed')
       const projectId = (created.data as { project: { id: string } }).project.id
 
-      await svc.handleRpcAction('project.bind', { projectId, workspaceId: 'ws_a', owner: 'auctra', refs: ['ep01'] })
-      const second = await svc.handleRpcAction('project.bind', { projectId, workspaceId: 'ws_a', owner: 'auctra', refs: ['ep02'] })
+      await mkdir(path.join(ws, 'ws-a'), { recursive: true })
+      const reg = await svc.handleRpcAction('workspace.register', { workspaceDir: path.join(ws, 'ws-a'), label: 'a' })
+      if (!reg.ok) throw new Error('register failed: ' + reg.error.code)
+      const wsA = (reg.data as { workspace: { workspaceId: string } }).workspace.workspaceId
+      await svc.handleRpcAction('project.bind', { projectId, workspaceId: wsA, owner: 'auctra', refs: ['ep01'] })
+      const second = await svc.handleRpcAction('project.bind', { projectId, workspaceId: wsA, owner: 'auctra', refs: ['ep02'] })
       if (!second.ok) throw new Error('second bind failed')
       expect((second.data as { project: { ownerBindings: unknown[] } }).project.ownerBindings).toHaveLength(1)
       svc.dispose()

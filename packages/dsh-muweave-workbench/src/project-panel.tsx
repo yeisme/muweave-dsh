@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { MuweaveRpcClient, MuweaveTranslator } from '@yeisme/dsh-muweave-core/client'
+import { BindingInspector, type OwnerBindingRow } from './binding-inspector'
 
 type ProjectStatus = 'preparing' | 'in_production' | 'ready_to_publish' | 'published' | 'archived'
-export interface ProjectRow { id: string; title: string; status: ProjectStatus; archived: boolean; workspaceRefs: string[]; updatedAt: string }
+export interface ProjectRow { id: string; title: string; status: ProjectStatus; archived: boolean; workspaceRefs: string[]; updatedAt: string; ownerBindings?: OwnerBindingRow[] }
 interface WorkspaceRow { workspaceId: string; label: string; hasBundle: boolean }
 const STATUS_LABELS: Record<ProjectStatus, string> = { preparing: '准备中', in_production: '制作中', ready_to_publish: '待发布', published: '已发布', archived: '已归档' }
 
@@ -46,9 +47,9 @@ export function ProjectPanel({
       const rows = projectRes.data?.projects ?? []
       setProjects(rows)
       const counts = await Promise.all(rows.map(async (project) => {
-        const rows = await Promise.all(project.workspaceRefs.map(async (workspace) => {
+        const rows = await Promise.all((project.workspaceRefs ?? []).map(async (workspace) => {
           const response = await rpc.call<{ elements: unknown[] }>('bundle.elements.list', { workspaceId: workspace, projectId: project.id })
-          return response.ok ? response.data.elements.length : 0
+          return response.ok ? (response.data?.elements?.length ?? 0) : 0
         }))
         return [project.id, rows.reduce((sum, count) => sum + count, 0)] as const
       }))
@@ -80,6 +81,7 @@ export function ProjectPanel({
     onActivate(result.data.project)
   }
   const restore = async (project: ProjectRow) => { const result = await rpc.call<{ project: ProjectRow }>('project.restore', { projectId: project.id, idempotencyKey: 'restore-' + project.id + '-' + project.updatedAt }); if (result.ok) await load() }
+  const active = projects.find((project) => project.id === activeProjectId)
   const full = <section className="mw-stack" data-muweave-projects="true" data-gap="sm">
     <div className="mw-spread"><span className="mw-eyebrow">项目</span><button type="button" className="mw-dsh-btn" data-variant="quiet" data-size="sm" onClick={() => setCreating((value) => !value)}>新建项目</button></div>
     {creating ? <form className="mw-dsh-card mw-stack" data-flat="true" onSubmit={(event) => void create(event)}>
@@ -103,6 +105,8 @@ export function ProjectPanel({
     </div>)}</nav>
     <button type="button" className="mw-dsh-btn" data-variant="quiet" data-size="sm" onClick={() => setIncludeArchived((value) => !value)}>{includeArchived ? '隐藏已归档' : '显示已归档'}</button>
     {projects.length === 0 ? <span className="mw-dsh-muted">还没有项目</span> : null}
+    {/* F1: the selected project's owner bindings, read from the project.list row above. */}
+    {active ? <BindingInspector key={active.id} rpc={rpc} project={active} onChanged={load} /> : null}
   </section>
 
   if (unsupported) {
@@ -116,7 +120,6 @@ export function ProjectPanel({
 
   if (variant === 'full') return full
 
-  const active = projects.find((project) => project.id === activeProjectId)
   return (
     <div className="mw-project-bar mw-row" data-muweave-project-bar="true" data-gap="sm">
       <span className="mw-eyebrow">项目</span>

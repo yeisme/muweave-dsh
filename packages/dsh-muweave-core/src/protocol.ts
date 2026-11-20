@@ -33,6 +33,26 @@ export interface ProjectOwnerBindingV1 {
   updatedAt: string
 }
 
+export interface ProjectBindInputV1 {
+  projectId: string
+  workspaceId: string
+  owner: ProjectOwnerBindingV1['owner']
+  refs: string[]
+  expectedRevision?: string
+}
+
+export interface ProjectUnbindInputV1 {
+  projectId: string
+  workspaceId: string
+  owner: ProjectOwnerBindingV1['owner']
+  refs?: string[]
+}
+
+export interface ProjectUnbindResultV1 {
+  project: ProjectRecordV1
+  removed: boolean
+}
+
 /** Durable project identity. Content stays in .muweave/; this record only holds intent. */
 export interface ProjectRecordV1 {
   id: string
@@ -102,6 +122,7 @@ export interface RpcErrorShape {
   message: string
   retryable?: boolean
   operationRef?: string
+  details?: Record<string, unknown>
 }
 
 export type RpcEnvelope<T = unknown> =
@@ -116,7 +137,7 @@ export function rpcFail(
   generation: number,
   code: string,
   message: string,
-  extra?: { retryable?: boolean; operationRef?: string; hostInstanceId?: string },
+  extra?: { retryable?: boolean; operationRef?: string; hostInstanceId?: string; details?: Record<string, unknown> },
 ): RpcEnvelope<never> {
   return {
     ok: false,
@@ -127,6 +148,7 @@ export function rpcFail(
       message,
       ...(extra?.retryable === undefined ? {} : { retryable: extra.retryable }),
       ...(extra?.operationRef ? { operationRef: extra.operationRef } : {}),
+      ...(extra?.details ? { details: extra.details } : {}),
     },
   }
 }

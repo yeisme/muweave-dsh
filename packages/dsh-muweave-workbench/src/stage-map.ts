@@ -216,3 +216,76 @@ export function variantSubject(job: JobRecordV1, slot: JobSlotV1, version: strin
     sha256: isImage ? slot.sha256 : undefined,
   }
 }
+
+/**
+ * F1 derived grouping (docs/design/project-features-next.md F1). A view projection over the element
+ * summaries already in hand: no RPC, no registry write, no bundle revision. A key the data does not
+ * carry lands in 「未标注」, never a guessed one.
+ */
+export type ElementGroupBy = 'scene' | 'character' | 'status' | 'media'
+
+export const UNLABELED_GROUP = '未标注'
+
+export interface ElementGroup<E> {
+  key: string
+  label: string
+  rows: E[]
+}
+
+type GroupableElement = Pick<MuweaveElementSummaryV1, 'kind' | 'status' | 'sourceRef'> &
+  Partial<Pick<MuweaveElementSummaryV1, 'sceneRef' | 'characterRefs'>>
+
+/**
+ * An explicit `scene:` segment of an opaque ref ("scene:01#context" and "proj:scene:s01" both carry
+ * one). A shot ref such as "shot:ep01:s01:01" names no scene segment, so it is not parsed for one.
+ */
+function sceneFromRef(ref: string | undefined): string | undefined {
+  const m = typeof ref === 'string' ? ref.trim().match(/(?:^|:)scene:([^#\s]+)/) : null
+  return m ? `scene:${m[1]}` : undefined
+}
+
+const MEDIA_LABELS: Record<string, string> = {
+  eikona: 'Eikona 视觉',
+  script: 'Auctra 剧本',
+  drama: 'Scaena 分镜',
+  harness: 'Pi / DSH 工件',
+}
+
+/** The one group key an element contributes for a dimension, or undefined when the data has none. */
+export function elementGroupKey(el: GroupableElement, by: ElementGroupBy): string | undefined {
+  const clean = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+  switch (by) {
+    case 'scene':
+      return clean(el?.sceneRef) ?? sceneFromRef(el?.sourceRef)
+    case 'character':
+      // Only the first character ref: expanding every ref would count one row in several groups.
+      return clean(Array.isArray(el?.characterRefs) ? el.characterRefs[0] : undefined)
+    case 'status':
+      return clean(el?.status)
+    case 'media': {
+      const kind = clean(el?.kind)
+      const prefix = kind && kind.includes('.') ? kind.slice(0, kind.indexOf('.')) : undefined
+      return clean(prefix)
+    }
+  }
+}
+
+/**
+ * Buckets elements by one dimension. Rows keep their incoming order inside a group; groups sort by
+ * key (numeric-aware, so s2 precedes s10; code-point order breaks ties) and 「未标注」 always comes last.
+ */
+export function groupElements<E extends GroupableElement>(elements: readonly E[], by: ElementGroupBy): ElementGroup<E>[] {
+  const buckets = new Map<string, E[]>()
+  const unlabeled: E[] = []
+  for (const el of elements ?? []) {
+    if (!el) continue
+    const key = elementGroupKey(el, by)
+    if (key === undefined) unlabeled.push(el)
+    else buckets.set(key, [...(buckets.get(key) ?? []), el])
+  }
+  const groups: ElementGroup<E>[] = [...buckets.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }) || (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, rows]) => ({ key, label: by === 'media' ? (MEDIA_LABELS[key] ?? key) : key, rows }))
+  if (unlabeled.length > 0) groups.push({ key: UNLABELED_GROUP, label: UNLABELED_GROUP, rows: unlabeled })
+  return groups
+}

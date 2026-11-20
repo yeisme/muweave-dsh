@@ -642,6 +642,12 @@ export class CreatorHostService {
       if (err instanceof BundleValidationError) {
         return stampHost(rpcFail(this.generation, `muweave/${err.code}`, err.message, { retryable: false }), this.hostInstanceId)
       }
+      if (err instanceof ProjectInputError) {
+        return stampHost(rpcFail(this.generation, err.code, err.message, {
+          retryable: false,
+          ...(err.details ? { details: err.details } : {}),
+        }), this.hostInstanceId)
+      }
       throw err
     }
   }
@@ -1051,16 +1057,28 @@ export class CreatorHostService {
         try {
           const projectId = typeof payload.projectId === 'string' ? payload.projectId : ''
           const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : ''
-          const owner = (typeof payload.owner === 'string' ? payload.owner : 'eikona') as never
-          const refs = Array.isArray(payload.refs) ? (payload.refs as string[]) : []
+          const owner = (typeof payload.owner === 'string' ? payload.owner : '') as never
+          const refs = Array.isArray(payload.refs) ? (payload.refs as string[]) : undefined
           const registry =
             action === 'project.bind'
-              ? this.projects.bind({ projectId, workspaceId, owner, refs })
+              ? this.projects.bind({
+                  projectId,
+                  workspaceId,
+                  owner,
+                  refs: refs ?? [],
+                  expectedRevision: typeof payload.expectedRevision === 'string'
+                    ? payload.expectedRevision
+                    : undefined,
+                  workspaceRegistered: this.workspaces.has(workspaceId),
+                })
               : this.projects.unbind({ projectId, workspaceId, owner, refs })
           this.bumpGeneration()
           return rpcOk(this.generation, registry)
         } catch (err) {
-          if (err instanceof ProjectInputError) return rpcFail(this.generation, err.code, err.message, { retryable: false })
+          if (err instanceof ProjectInputError) return rpcFail(this.generation, err.code, err.message, {
+            retryable: false,
+            ...(err.details ? { details: err.details } : {}),
+          })
           throw err
         }
       }
