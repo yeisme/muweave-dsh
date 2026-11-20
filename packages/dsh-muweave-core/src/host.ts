@@ -1052,6 +1052,44 @@ export class CreatorHostService {
         }
       }
 
+      case 'project.claim': {
+        try {
+          const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId.trim() : ''
+          const projectId = typeof payload.projectId === 'string' ? payload.projectId.trim() : ''
+          const title = typeof payload.title === 'string' ? payload.title : ''
+          const status = typeof payload.status === 'string' ? (payload.status as never) : undefined
+          const idempotencyKey = typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey : ''
+          if (!workspaceId || !this.workspaces.has(workspaceId)) {
+            throw new ProjectInputError('muweave/workspace_unknown', 'Workspace is not registered')
+          }
+          const ws = this.workspaces.get(workspaceId)!
+          const manifest = await readBundleManifestFromDisk(ws.dir)
+          if (!projectId || projectId !== manifest.projectId) {
+            throw new ProjectInputError(
+              'muweave/project_id_conflict',
+              'Claim projectId must match the bundle projectId',
+              { bundleProjectId: manifest.projectId },
+            )
+          }
+          const result = this.projects.claim({
+            workspaceId,
+            projectId,
+            title,
+            status,
+            idempotencyKey,
+            workspaceRegistered: true,
+          })
+          this.bumpGeneration()
+          return rpcOk(this.generation, result)
+        } catch (err) {
+          if (err instanceof ProjectInputError) return rpcFail(this.generation, err.code, err.message, {
+            retryable: false,
+            ...(err.details ? { details: err.details } : {}),
+          })
+          throw err
+        }
+      }
+
       case 'project.bind':
       case 'project.unbind': {
         try {

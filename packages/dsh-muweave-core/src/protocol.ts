@@ -48,6 +48,20 @@ export interface ProjectUnbindInputV1 {
   refs?: string[]
 }
 
+export interface ProjectClaimInputV1 {
+  workspaceId: string
+  projectId: string
+  title: string
+  status?: ProjectStatus
+  idempotencyKey: string
+}
+
+export interface ProjectClaimResultV1 {
+  project: ProjectRecordV1
+  workspaceRefs: string[]
+  claimed: true
+}
+
 export interface ProjectUnbindResultV1 {
   project: ProjectRecordV1
   removed: boolean
@@ -67,6 +81,8 @@ export interface ProjectRecordV1 {
   archived: boolean
   lastSyncedAt?: string
   lastObservedRevisions?: Record<string, string>
+  /** Present only for a project created by project.claim; used for replay-safe claims. */
+  claimIdempotencyKey?: string
 }
 
 export interface ProjectsRegistryV1 {
@@ -107,6 +123,7 @@ export const RPC_ACTIONS = [
   'project.restore',
   'project.bind',
   'project.unbind',
+  'project.claim',
   'project.activate',
   'project.clone',
 ] as const

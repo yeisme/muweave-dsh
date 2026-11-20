@@ -4567,6 +4567,229 @@ body[data-ds-dark-theme] .mw-ambient > i {
   padding-bottom: var(--mw-s-1);
   border-bottom: 1px solid var(--mw-line);
 }
+
+/* ---------- F2: old-bundle claim wizard (docs/design/project-features-next.md F2) ----------
+   Lives in the project popover like the F1 inspector: hairline rows, no new colours. The step
+   indicator is two dots with the current label in bold. Each step fades in over the fast token;
+   the global reduced-motion rule stops it. */
+
+.mw-claim-entry-wrap {
+  display: flex;
+  padding-top: var(--mw-s-2);
+  border-top: 1px solid var(--mw-line);
+}
+
+.mw-claim-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-2);
+  flex: 1;
+  min-height: 2rem;
+  padding: 0 var(--mw-s-2);
+  border: 0;
+  border-radius: var(--mw-r-2);
+  background: transparent;
+  color: var(--mw-label);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--mw-dur-fast) var(--mw-ease-out);
+}
+
+.mw-claim-entry:hover:not(:disabled) {
+  background: var(--mw-fill-1);
+}
+
+.mw-claim-entry:disabled {
+  color: var(--mw-label-3);
+  cursor: default;
+}
+
+.mw-claim-count {
+  margin-left: auto;
+  color: var(--mw-label-2);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-claim {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-3);
+}
+
+.mw-claim-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mw-s-3);
+}
+
+.mw-claim-steps {
+  display: flex;
+  gap: var(--mw-s-3);
+  margin: 0 0 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.mw-claim-step {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-1);
+  color: var(--mw-label-3);
+  font-size: 0.75rem;
+}
+
+.mw-claim-step::before {
+  content: "";
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--mw-line-strong);
+}
+
+.mw-claim-step[data-current="true"] {
+  color: var(--mw-label);
+  font-weight: 600;
+}
+
+.mw-claim-step[data-current="true"]::before {
+  background: var(--mw-label);
+  box-shadow: none;
+}
+
+.mw-claim-body,
+.mw-claim-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+}
+
+.mw-claim-body {
+  animation: mw-fade-in var(--mw-dur-fast) var(--mw-ease-out) both;
+}
+
+.mw-claim-empty {
+  padding: var(--mw-s-2) 0;
+}
+
+.mw-claim-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--mw-r-2);
+  box-shadow: inset 0 0 0 1px var(--mw-line);
+}
+
+.mw-claim-list > li + li {
+  border-top: 1px solid var(--mw-line);
+}
+
+.mw-claim-item {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-2);
+  width: 100%;
+  min-height: 2.5rem;
+  padding: var(--mw-s-1) var(--mw-s-2);
+  border: 0;
+  background: transparent;
+  color: var(--mw-label);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--mw-dur-fast) var(--mw-ease-out);
+}
+
+.mw-claim-item:hover {
+  background: var(--mw-fill-1);
+}
+
+.mw-claim-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mw-claim-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mw-mono);
+  font-size: 0.75rem;
+  color: var(--mw-label-2);
+}
+
+.mw-claim-num {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--mw-label-3);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-claim-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--mw-s-1) var(--mw-s-3);
+  margin: 0;
+  padding: var(--mw-s-2);
+  border-radius: var(--mw-r-2);
+  box-shadow: inset 0 0 0 1px var(--mw-line);
+  font-size: 0.8125rem;
+}
+
+.mw-claim-facts > dt {
+  color: var(--mw-label-3);
+  font-size: 0.75rem;
+}
+
+.mw-claim-facts > dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mw-claim-facts .mw-claim-num {
+  margin-left: 0;
+}
+
+.mw-claim-note {
+  margin: 0;
+  padding: var(--mw-s-2);
+  border-radius: var(--mw-r-2);
+  background: var(--mw-fill-1);
+  color: var(--mw-label-2);
+  font-size: 0.75rem;
+}
+
+.mw-claim-error {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-2);
+  flex-wrap: wrap;
+  padding: var(--mw-s-2);
+  border-radius: var(--mw-r-2);
+  background: color-mix(in oklch, var(--mw-bad) 10%, transparent);
+  font-size: 0.75rem;
+}
+
+.mw-claim-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-1);
+}
+
+.mw-claim-notice {
+  align-items: center;
+  margin-top: var(--mw-s-2);
+}
 `
 
 interface SharedStyleHolder {

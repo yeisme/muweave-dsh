@@ -155,6 +155,10 @@ function normalizeProject(raw: unknown): ProjectRecordV1 | undefined {
     ...(typeof value.lastSyncedAt === "string"
       ? { lastSyncedAt: value.lastSyncedAt }
       : {}),
+    ...(typeof value.claimIdempotencyKey === "string" &&
+    value.claimIdempotencyKey.trim()
+      ? { claimIdempotencyKey: value.claimIdempotencyKey.trim() }
+      : {}),
   };
 }
 
@@ -215,6 +219,7 @@ export class ProjectStore {
     workspaceIds?: string[];
     coverRef?: string;
     id?: string;
+    claimIdempotencyKey?: string;
   }): ProjectRecordV1 {
     if (!isValidProjectTitle(input.title))
       throw new ProjectInputError(
@@ -261,12 +266,75 @@ export class ProjectStore {
       ...(input.coverRef ? { coverRef: input.coverRef } : {}),
       archived: status === "archived",
       ...(status === "archived" ? { archivedAt: now } : {}),
+      ...(input.claimIdempotencyKey
+        ? { claimIdempotencyKey: input.claimIdempotencyKey.trim() }
+        : {}),
     };
     this.projects.push(project);
     this.activeProjectId = id;
     this.persist();
     return project;
   }
+  claim(input: {
+    workspaceId: string;
+    projectId: string;
+    title: string;
+    status?: ProjectStatus;
+    idempotencyKey: string;
+    workspaceRegistered?: boolean;
+  }): {
+    project: ProjectRecordV1;
+    workspaceRefs: string[];
+    claimed: true;
+  } {
+    if (input.workspaceRegistered === false)
+      throw new ProjectInputError(
+        "muweave/workspace_unknown",
+        "Workspace is not registered",
+      );
+    const idempotencyKey = input.idempotencyKey.trim();
+    if (!idempotencyKey)
+      throw new ProjectInputError(
+        "muweave/invalid_idempotency_key",
+        "Claim idempotencyKey is required",
+      );
+    if (!isValidProjectTitle(input.title))
+      throw new ProjectInputError(
+        "muweave/invalid_project_title",
+        "Project title must be 1-120 characters",
+      );
+    if (input.status !== undefined && !isValidProjectStatus(input.status))
+      throw new ProjectInputError(
+        "muweave/invalid_project_status",
+        "Invalid project status",
+      );
+    const existing = this.get(input.projectId);
+    if (existing) {
+      if (existing.claimIdempotencyKey === idempotencyKey)
+        return {
+          project: existing,
+          workspaceRefs: existing.workspaceRefs,
+          claimed: true,
+        };
+      throw new ProjectInputError(
+        "muweave/project_exists",
+        "Project id already exists",
+      );
+    }
+    const project = this.create({
+      title: input.title,
+      status: input.status,
+      id: input.projectId,
+      workspaceId: input.workspaceId,
+      claimIdempotencyKey: idempotencyKey,
+    });
+    return {
+      project,
+      workspaceRefs: project.workspaceRefs,
+      claimed: true,
+    };
+  }
+
   /**
    * Copies project *metadata only* (title hint + status). Owner bindings, cover, elements and the
    * schedule board are deliberately not copied — see docs/design/project-management-arch.md.

@@ -234,6 +234,8 @@ export function WorkbenchMainPage({
   const [activeProject, setActiveProject] = useState<ProjectRow | undefined>(undefined)
   /** True when the selected project has no elements of its own yet (showing the workspace fallback). */
   const [projectUnclaimed, setProjectUnclaimed] = useState(false)
+  /** F2: bumping the nonce opens the project popover straight on the claim wizard. */
+  const [claimRequest, setClaimRequest] = useState<{ nonce: number; workspaceId?: string } | undefined>(undefined)
   /** Desk v8: the Overview tab leads with the stage axis; the masonry stays one toggle away as 「全部」. */
   const [overviewMode, setOverviewMode] = useState<'stage' | 'all'>('stage')
   /** Undefined until the user picks one, so the default follows the data as it loads. */
@@ -675,13 +677,25 @@ export function WorkbenchMainPage({
     toolCatalogPanel
   )
 
-  const projectNotice: WorkspaceNotice | null =
-    projectUnclaimed && activeProject
-      ? {
-          tone: 'neutral',
-          text: `项目「${activeProject.title}」还没有自己的元件，当前展示整个工作区；在项目条里绑定 owner 引用后会按项目过滤。`,
-        }
-      : null
+  // The shell's notice is text-only, so the fallback notice sits under the project bar where it can
+  // carry the F2 「认领此 bundle」 action. Same notice styling; a distinct data hook from F2's states.
+  const projectNotice =
+    projectUnclaimed && activeProject ? (
+      <div className="mw-dsh-notice mw-claim-notice" data-tone="neutral" role="status" data-project-unclaimed="true">
+        <span className="mw-dot" />
+        <p>{`项目「${activeProject.title}」还没有自己的元件，当前展示整个工作区；在项目条里绑定 owner 引用，或认领这个 bundle 后会按项目过滤。`}</p>
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-variant="quiet"
+          data-size="sm"
+          data-claim-open="true"
+          onClick={() => setClaimRequest((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, workspaceId: activeProject.workspaceRefs?.[0] }))}
+        >
+          认领此 bundle
+        </button>
+      </div>
+    ) : null
 
   // The live current side: the selected element, else this stage's L1 primary. Against a variant the
   // comparable digest is the cover image, so the media basis is used (slot sha256 is image bytes).
@@ -702,11 +716,14 @@ export function WorkbenchMainPage({
         t={coreT}
         rightInspector={compareShown ? undefined : rightInspector}
         onSyncRequested={loadList}
-        notice={notice ?? projectNotice}
+        notice={notice}
         onDismissNotice={() => setNotice(null)}
         leftTree={leftTree}
         projectBar={
-          <ProjectPanel rpc={rpc} t={coreT} activeProjectId={activeProject?.id} onActivate={setActiveProject} />
+          <>
+            <ProjectPanel rpc={rpc} t={coreT} activeProjectId={activeProject?.id} onActivate={setActiveProject} claimRequest={claimRequest} />
+            {projectNotice}
+          </>
         }
         hero={
           <RoomHero

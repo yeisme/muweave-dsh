@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { MuweaveRpcClient, MuweaveTranslator } from '@yeisme/dsh-muweave-core/client'
 import { BindingInspector, type OwnerBindingRow } from './binding-inspector'
+import { ClaimWizard, discoverClaimCandidates, type ClaimCandidate, type ClaimedProject } from './claim-wizard'
 
 type ProjectStatus = 'preparing' | 'in_production' | 'ready_to_publish' | 'published' | 'archived'
 export interface ProjectRow { id: string; title: string; status: ProjectStatus; archived: boolean; workspaceRefs: string[]; updatedAt: string; ownerBindings?: OwnerBindingRow[] }
@@ -19,12 +20,15 @@ export function ProjectPanel({
   activeProjectId,
   onActivate,
   variant = 'bar',
+  claimRequest,
 }: {
   rpc: MuweaveRpcClient
   t: MuweaveTranslator
   activeProjectId?: string
   onActivate: (project: ProjectRow | undefined) => void
   variant?: 'bar' | 'full'
+  /** F2: a new nonce opens the popover on the claim wizard, preferring that workspace's bundle. */
+  claimRequest?: { nonce: number; workspaceId?: string }
 }) {
   const [projects, setProjects] = useState<ProjectRow[]>([])
   const [workspaces, setWorkspaces] = useState<WorkspaceRow[]>([])
@@ -39,6 +43,11 @@ export function ProjectPanel({
   const [owner, setOwner] = useState<'eikona' | 'auctra' | 'scaena' | 'pi'>('eikona')
   const [ownerRef, setOwnerRef] = useState('')
   const [elementCounts, setElementCounts] = useState<Record<string, number>>({})
+  /** F2: null until discovery answers; `claiming` holds the wizard's entry point while it is shown. */
+  const [claimCandidates, setClaimCandidates] = useState<ClaimCandidate[] | null>(null)
+  const [claimError, setClaimError] = useState<string | undefined>(undefined)
+  const [claiming, setClaiming] = useState<{ workspaceId?: string } | null>(null)
+  const [discoveryNonce, setDiscoveryNonce] = useState(0)
   const load = useCallback(async () => {
     const [projectRes, workspaceRes] = await Promise.all([rpc.call<{ projects: ProjectRow[]; activeProjectId?: string }>('project.list', { includeArchived }), rpc.call<{ workspaces: WorkspaceRow[] }>('workspace.list', {})])
     setUnsupported(!projectRes.ok)
@@ -60,6 +69,38 @@ export function ProjectPanel({
     if (workspaceRes.ok) setWorkspaces(workspaceRes.data?.workspaces ?? [])
   }, [activeProjectId, includeArchived, onActivate, rpc])
   useEffect(() => { void load() }, [load])
+  // F2 discovery costs one bundle.status per workspace, so it waits for the user to open the popover
+  // (or the notice's claim button) instead of running at startup; each open re-reads.
+  const discoveryWanted = variant === 'full' || open
+  useEffect(() => {
+    if (!discoveryWanted) return
+    let live = true
+    setClaimCandidates(null)
+    setClaimError(undefined)
+    void discoverClaimCandidates(rpc)
+      .then((result) => {
+        if (!live) return
+        if (result.ok) setClaimCandidates(result.candidates)
+        else { setClaimCandidates([]); setClaimError(result.message) }
+      })
+      .catch((err: unknown) => { if (live) { setClaimCandidates([]); setClaimError(err instanceof Error ? err.message : String(err)) } })
+    return () => { live = false }
+  }, [discoveryWanted, discoveryNonce, rpc])
+  useEffect(() => {
+    if (!claimRequest) return
+    setOpen(true)
+    setCreating(false)
+    setClaiming({ workspaceId: claimRequest.workspaceId ?? '' })
+  }, [claimRequest])
+  /** Registry write is done; activating the new project is what ends the workspace fallback. */
+  const claimed = async (project: ClaimedProject) => {
+    const result = await rpc.call<{ project?: ProjectRow }>('project.activate', { projectId: project.id })
+    const next = result?.ok && result.data?.project?.id === project.id ? result.data.project : (project as ProjectRow)
+    setClaiming(null)
+    setOpen(false)
+    await load()
+    onActivate(next)
+  }
   const activate = async (project: ProjectRow) => { const result = await rpc.call<{ project: ProjectRow }>('project.activate', { projectId: project.id }); if (result.ok) onActivate(result.data.project) }
   const create = async (event: FormEvent) => {
     event.preventDefault(); if (!title.trim()) return
@@ -82,6 +123,36 @@ export function ProjectPanel({
   }
   const restore = async (project: ProjectRow) => { const result = await rpc.call<{ project: ProjectRow }>('project.restore', { projectId: project.id, idempotencyKey: 'restore-' + project.id + '-' + project.updatedAt }); if (result.ok) await load() }
   const active = projects.find((project) => project.id === activeProjectId)
+  const claimCount = claimCandidates?.length ?? 0
+  const claimHint = claimCandidates === null ? '正在检查哪些 bundle 还没登记' : claimError ?? (claimCount === 0 ? '没有待认领的 bundle：带 projectId 的 bundle 都已登记为项目' : undefined)
+  // The span carries the tooltip because a disabled button swallows hover in some engines.
+  const claimEntry = (
+    <span className="mw-claim-entry-wrap" title={claimHint}>
+      <button
+        type="button"
+        className="mw-claim-entry"
+        data-claim-entry="true"
+        data-claim-count={claimCandidates === null ? undefined : String(claimCount)}
+        disabled={claimCandidates === null || (claimCount === 0 && !claimError)}
+        onClick={() => { setCreating(false); setClaiming({}) }}
+      >
+        <span>认领旧 bundle</span>
+        {claimCount > 0 ? <span className="mw-claim-count">{claimCount}</span> : null}
+      </button>
+    </span>
+  )
+  const wizard = claiming ? (
+    <ClaimWizard
+      key={claiming.workspaceId === undefined ? 'entry' : 'request-' + (claimRequest?.nonce ?? 0)}
+      rpc={rpc}
+      candidates={claimCandidates}
+      error={claimError}
+      initialWorkspaceId={claiming.workspaceId}
+      onClaimed={claimed}
+      onCancel={() => setClaiming(null)}
+      onReload={() => setDiscoveryNonce((n) => n + 1)}
+    />
+  ) : null
   const full = <section className="mw-stack" data-muweave-projects="true" data-gap="sm">
     <div className="mw-spread"><span className="mw-eyebrow">项目</span><button type="button" className="mw-dsh-btn" data-variant="quiet" data-size="sm" onClick={() => setCreating((value) => !value)}>新建项目</button></div>
     {creating ? <form className="mw-dsh-card mw-stack" data-flat="true" onSubmit={(event) => void create(event)}>
@@ -107,6 +178,7 @@ export function ProjectPanel({
     {projects.length === 0 ? <span className="mw-dsh-muted">还没有项目</span> : null}
     {/* F1: the selected project's owner bindings, read from the project.list row above. */}
     {active ? <BindingInspector key={active.id} rpc={rpc} project={active} onChanged={load} /> : null}
+    {claimEntry}
   </section>
 
   if (unsupported) {
@@ -118,7 +190,7 @@ export function ProjectPanel({
     )
   }
 
-  if (variant === 'full') return full
+  if (variant === 'full') return wizard ?? full
 
   return (
     <div className="mw-project-bar mw-row" data-muweave-project-bar="true" data-gap="sm">
@@ -130,18 +202,18 @@ export function ProjectPanel({
         data-size="sm"
         aria-expanded={open}
         aria-haspopup="true"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => { if (open) setClaiming(null); setOpen(!open) }}
       >
         <span className="mw-truncate">{active ? active.title : '未选择项目'}</span>
         {active ? <span className="mw-chip">{STATUS_LABELS[active.status]}</span> : null}
         {active ? <span className="mw-dsh-muted">{elementCounts[active.id] ?? 0}</span> : null}
       </button>
-      <button type="button" className="mw-dsh-btn" data-variant="ghost" data-size="sm" onClick={() => { setCreating(true); setOpen(true) }}>
+      <button type="button" className="mw-dsh-btn" data-variant="ghost" data-size="sm" onClick={() => { setClaiming(null); setCreating(true); setOpen(true) }}>
         新建项目
       </button>
       {open ? (
         <div className="mw-project-popover" data-popover="true" role="dialog" aria-label="项目管理">
-          {full}
+          {wizard ?? full}
         </div>
       ) : null}
     </div>
