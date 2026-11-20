@@ -15,3 +15,6 @@ test-results/
 .claude/
 .pi-bg/
 .skill-sync.*/
+
+# pi agent runtime state (memory, subagent runs) — local, not project source.
+.pi/

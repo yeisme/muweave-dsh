@@ -3381,6 +3381,34 @@ body[data-ds-dark-theme] .mw-ambient > i {
   color: var(--mw-label-2);
 }
 
+/* Ownership inferred from a legacy ref: same tone, plus a quiet trailing word. Not a warning. */
+.mw-sched-chip[data-basis="inferred"] {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.mw-sched-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mw-sched-chip-basis {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  color: var(--mw-label-3);
+  font-size: 0.625rem;
+}
+
+.mw-sched-legacy {
+  margin: 0;
+  padding-block-end: var(--mw-s-2);
+  border-block-end: 1px solid var(--mw-line);
+  color: var(--mw-label-3);
+  font-size: 0.6875rem;
+}
+
 .mw-sched-legend {
   font-size: 0.6875rem;
 }

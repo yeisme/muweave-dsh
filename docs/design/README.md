@@ -12,6 +12,7 @@
 | [f3-spec.md](./f3-spec.md) | 现行 | F3 项目诊断的只读契约、异常映射和交互验收 | 需要实施或评审项目诊断时 |
 | [project-management-arch.md](./project-management-arch.md) | 现行 | 项目注册表、RPC 边界、P0-P2 架构验收 | 需要核对项目数据边界、错误码和长期兼容预留时 |
 | [f1-delivery.md](./f1-delivery.md) | 参考（不改） | F1 的实现范围、证据、提交和已知未做项 | 需要核对 F1 已交付事实或验证数字时 |
+| [schedule-v2-delivery.md](./schedule-v2-delivery.md) | 参考（不改） | 排期项目维度的实现范围、legacy 处理与验证数字 | 需要核对排期归属判定依据时 |
 | [f2-delivery.md](./f2-delivery.md) | 参考（不改） | F2 的实现范围、证据、提交和已知未做项 | 需要核对 F2 认领向导事实或验证数字时 |
 | [README.md](./README.md) | 现行 | 本目录的阅读入口和时效性索引 | 进入 docs/design 目录时 |
 

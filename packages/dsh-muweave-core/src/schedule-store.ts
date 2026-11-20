@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import type { ScheduleBoardV1, ScheduleEntryV1 } from './protocol'
+import type { ScheduleBoardV1, ScheduleEntryV1, ScheduleEntryViewV1 } from './protocol'
 
 /**
  * Standalone publishing schedule board (docs/design/desk-v4.md): one row per `.muweave/` reference
@@ -14,6 +14,7 @@ export const MAX_SCHEDULE_ENTRIES = 500
 export type { ScheduleBoardV1, ScheduleEntryV1 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const PROJECT_ID_RE = /^proj_[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/
 
 /** True for a real calendar day in `YYYY-MM-DD` form (rejects 2026-02-31). */
 export function isValidScheduleDate(value: string): boolean {
@@ -29,6 +30,7 @@ function validEntry(raw: unknown): ScheduleEntryV1 | undefined {
   const r = raw as Partial<ScheduleEntryV1>
   if (typeof r.ref !== 'string' || !r.ref.trim()) return undefined
   if (typeof r.date !== 'string' || !isValidScheduleDate(r.date)) return undefined
+  const projectId = typeof r.projectId === 'string' && isValidScheduleProjectId(r.projectId) ? r.projectId : undefined
   return {
     ref: r.ref.trim(),
     label: typeof r.label === 'string' && r.label.trim() ? r.label.trim() : r.ref.trim(),
@@ -36,6 +38,7 @@ function validEntry(raw: unknown): ScheduleEntryV1 | undefined {
     date: r.date,
     note: typeof r.note === 'string' && r.note.trim() ? r.note.trim() : undefined,
     updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : new Date().toISOString(),
+    ...(projectId ? { projectId } : {}),
   }
 }
 
@@ -49,21 +52,30 @@ export class ScheduleStore {
   }
 
   list(): ScheduleBoardV1 {
+    const entries: ScheduleEntryViewV1[] = [...this.entries]
+      .sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref))
+      .map((entry) => entry.projectId
+        ? { ...entry }
+        : { ...entry, legacy: true })
     return {
       schema: SCHEDULE_SCHEMA,
-      entries: [...this.entries].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref)),
+      entries,
       updatedAt: this.updatedAt(),
     }
   }
 
   /** Upsert by ref: one reference holds exactly one date. */
-  plan(input: { ref: string; date: string; label?: string; kind?: string; note?: string }): ScheduleBoardV1 {
+  plan(input: { ref: string; date: string; label?: string; kind?: string; note?: string; projectId?: unknown }): ScheduleBoardV1 {
     const ref = input.ref.trim()
     if (!ref) throw new ScheduleInputError('muweave/invalid_ref', 'ref is required')
     if (!isValidScheduleDate(input.date)) throw new ScheduleInputError('muweave/invalid_date', 'date must be YYYY-MM-DD')
+    const projectId = input.projectId
+    if (projectId !== undefined && !isValidScheduleProjectId(projectId)) {
+      throw new ScheduleInputError('muweave/invalid_schedule_entry', 'projectId must start with proj_ and contain only safe reference characters')
+    }
     const idx = this.entries.findIndex((e) => e.ref === ref)
     const prev = idx >= 0 ? this.entries[idx] : undefined
-    // Moving a slot keeps whatever the caller did not restate (label/kind/note stay put).
+    // Moving a slot keeps label/kind/note, but ownership is always caller-supplied: omitted means legacy.
     const next: ScheduleEntryV1 = {
       ref,
       label: input.label?.trim() || prev?.label || ref,
@@ -71,6 +83,7 @@ export class ScheduleStore {
       date: input.date,
       note: input.note?.trim() || prev?.note,
       updatedAt: new Date().toISOString(),
+      ...(projectId !== undefined ? { projectId } : {}),
     }
     if (idx >= 0) this.entries[idx] = next
     else this.entries.push(next)
@@ -122,6 +135,10 @@ export class ScheduleStore {
 }
 
 /** Typed input failure the RPC layer turns into a stable error envelope. */
+export function isValidScheduleProjectId(value: unknown): value is string {
+  return typeof value === 'string' && PROJECT_ID_RE.test(value)
+}
+
 export class ScheduleInputError extends Error {
   constructor(readonly code: string, message: string) {
     super(message)

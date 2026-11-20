@@ -355,7 +355,7 @@ export function validateIncomingRpcBody(raw: unknown):
   return { ok: true, action: obj.action, payload: payload as Record<string, unknown> }
 }
 
-/** One row of the publishing board (`muweave.schedule.v1`); the bundle stays the element truth. */
+/** One persisted row of the publishing board; the bundle stays the element truth. */
 export interface ScheduleEntryV1 {
   ref: string
   label: string
@@ -364,11 +364,23 @@ export interface ScheduleEntryV1 {
   date: string
   note?: string
   updatedAt: string
+  /** Optional v1-compatible ownership extension; omitted on legacy rows. */
+  projectId?: string
+}
+
+/**
+ * Response-only view of a schedule row. `legacy` is derived for clients and is never persisted;
+ * the optional `projectId` extension keeps the existing `muweave.schedule.v1` schema compatible.
+ * Do not add a board-level v2 marker: this optional field is a backward-compatible v1 extension,
+ * and a version marker would create migration work without changing the board's required shape.
+ */
+export interface ScheduleEntryViewV1 extends ScheduleEntryV1 {
+  legacy?: true
 }
 
 export interface ScheduleBoardV1 {
   schema: 'muweave.schedule.v1'
-  entries: ScheduleEntryV1[]
+  entries: ScheduleEntryViewV1[]
   updatedAt: string
 }
 

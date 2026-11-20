@@ -1174,6 +1174,7 @@ export class CreatorHostService {
             label: typeof payload.label === 'string' ? payload.label : undefined,
             kind: typeof payload.kind === 'string' ? payload.kind : undefined,
             note: typeof payload.note === 'string' ? payload.note : undefined,
+            projectId: payload.projectId,
           })
           this.bumpGeneration()
           return rpcOk(this.generation, board)

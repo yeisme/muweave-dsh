@@ -26,7 +26,11 @@ import { addMonths, moveDayFocus, popUndo, pushUndo, type ScheduleUndoEntry } fr
 import {
   PROJECT_SCOPE_DICT_EN,
   PROJECT_SCOPE_DICT_ZH,
+  entryProjectId,
+  isLegacyEntry,
+  scopeBacklogRows,
   scopeScheduleEntries,
+  type OwnershipBasis,
   type ScheduleEntryOwnership,
   type ScheduleScopeProject,
 } from './project-scope'
@@ -223,6 +227,20 @@ interface BacklogRow {
 /** Rows per backlog group; the pool is a picker, not an inventory. */
 const BACKLOG_LIMIT = 40
 
+/**
+ * Board entries as the host sends them. `projectId`/`legacy` are schedule v2 fields read
+ * defensively; rows without a string ref and day are dropped instead of breaking the grid.
+ */
+type BoardEntry = ScheduleEntryV1 & { projectId?: unknown; legacy?: unknown }
+
+function boardEntries(data: unknown): BoardEntry[] | undefined {
+  const raw = (data as { entries?: unknown } | null | undefined)?.entries
+  if (!Array.isArray(raw)) return undefined
+  return raw.filter(
+    (e): e is BoardEntry => typeof e === 'object' && e !== null && typeof (e as BoardEntry).ref === 'string' && typeof (e as BoardEntry).date === 'string',
+  )
+}
+
 /** Chip tint by ownership, from status tones only: overdue warns, the current project is info. */
 function chipTone(ownership: ScheduleEntryOwnership | undefined, overdue: boolean): string {
   if (overdue) return 'warn'
@@ -252,7 +270,7 @@ export function ScheduleMainPage({
     const now = new Date()
     return { year: now.getFullYear(), month0: now.getMonth() }
   })
-  const [board, setBoard] = useState<ScheduleBoardV1 | undefined>(undefined)
+  const [entries, setEntries] = useState<BoardEntry[]>([])
   const [elements, setElements] = useState<MuweaveElementSummaryV1[]>([])
   const [project, setProject] = useState<ScheduleScopeProject | undefined>(undefined)
   const [projectsUnsupported, setProjectsUnsupported] = useState(false)
@@ -273,8 +291,12 @@ export function ScheduleMainPage({
 
   const loadBoard = useCallback(async () => {
     const res = await rpc.call<ScheduleBoardV1>('schedule.list', {})
-    if (res.ok && Array.isArray(res.data?.entries)) setBoard(res.data)
+    const next = res.ok ? boardEntries(res.data) : undefined
+    if (next) setEntries(next)
   }, [rpc])
+
+  /** projectId of entries cleared this session, so undoing a clear restores the same ownership. */
+  const clearedProjectRef = useRef(new Map<string, string | undefined>())
 
   /**
    * Per-workspace element cache keyed by rpc client. Switching projects (or re-entering the room)
@@ -355,23 +377,22 @@ export function ScheduleMainPage({
     return map
   }, [projectElements])
 
-  const entries = board?.entries ?? []
-  const scopedEntries = useMemo(
-    () => scopeScheduleEntries(entries.map((e) => ({ ...e, workspaceId: refWorkspace.get(e.ref) })), project),
-    [entries, refWorkspace, project],
-  )
-  const ownershipByRef = useMemo(() => {
-    const map = new Map<string, ScheduleEntryOwnership>()
-    for (const group of ['mine', 'unknown', 'others'] as const) for (const e of scopedEntries[group]) map.set(e.ref, group)
+  const scopedEntries = useMemo(() => scopeScheduleEntries(entries, project), [entries, project])
+  const scopeByRef = useMemo(() => {
+    const map = new Map<string, { ownership: ScheduleEntryOwnership; basis: OwnershipBasis }>()
+    for (const group of ['mine', 'unknown', 'others'] as const) {
+      for (const { entry, ownership, basis } of scopedEntries[group]) map.set(entry.ref, { ownership, basis })
+    }
     return map
   }, [scopedEntries])
   const visibleEntries = useMemo(
-    () => [...scopedEntries.mine, ...scopedEntries.unknown, ...(showOthers ? scopedEntries.others : [])],
+    () => [...scopedEntries.mine, ...scopedEntries.unknown, ...(showOthers ? scopedEntries.others : [])].map((s) => s.entry),
     [scopedEntries, showOthers],
   )
+  const legacyCount = useMemo(() => entries.filter(isLegacyEntry).length, [entries])
 
   const byDate = useMemo(() => {
-    const map = new Map<string, ScheduleEntryV1[]>()
+    const map = new Map<string, BoardEntry[]>()
     for (const e of visibleEntries) {
       const list = map.get(e.date) ?? []
       list.push(e)
@@ -394,7 +415,7 @@ export function ScheduleMainPage({
     for (const { workspaceId, element } of projectElements) add(element, workspaceId)
     for (const el of elements) add(el)
     rows.sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.label.localeCompare(b.label))
-    const groups = scopeScheduleEntries(rows, project)
+    const groups = scopeBacklogRows(rows, project)
     return {
       mine: groups.mine.slice(0, BACKLOG_LIMIT),
       unknown: groups.unknown.slice(0, BACKLOG_LIMIT),
@@ -417,7 +438,8 @@ export function ScheduleMainPage({
 
   const monthPrefix = `${cursor.year}-${`${cursor.month0 + 1}`.padStart(2, '0')}`
   const monthEntries = visibleEntries.filter((e) => e.date.startsWith(monthPrefix))
-  const monthUnknown = monthEntries.filter((e) => ownershipByRef.get(e.ref) === 'unknown').length
+  const monthUnknown = project ? monthEntries.filter((e) => scopeByRef.get(e.ref)?.ownership === 'unknown').length : 0
+  const monthInferred = project ? monthEntries.filter((e) => scopeByRef.get(e.ref)?.basis === 'inferred').length : 0
   const overdue = visibleEntries.filter((e) => e.date < today).length
   const weeks = useMemo(() => monthMatrix(cursor.year, cursor.month0), [cursor])
   const monthLabel = new Date(cursor.year, cursor.month0, 1).toLocaleDateString(lang === 'en' ? 'en-US' : 'zh-CN', { year: 'numeric', month: 'long' })
@@ -437,11 +459,20 @@ export function ScheduleMainPage({
     return t('kindElement')
   }
 
-  const plan = async (ref: string, date: string, label: string, kind: string, recordUndo = true) => {
+  /**
+   * Moving an existing entry keeps whatever projectId it already has (none stays none: re-dating is
+   * not a claim of ownership). A new entry takes the active project; without one it is sent bare.
+   */
+  const plan = async (ref: string, date: string, label: string, kind: string, recordUndo = true, restoreProjectId?: string) => {
     const previous = entries.find((entry) => entry.ref === ref)
-    const res = await rpc.call<ScheduleBoardV1>('schedule.plan', { ref, date, label, kind, note: note.trim() || undefined })
+    const projectIdToSend = previous ? entryProjectId(previous) : recordUndo ? project?.id : restoreProjectId
+    const payload: Record<string, unknown> = { ref, date, label, kind, note: note.trim() || undefined }
+    if (projectIdToSend) payload.projectId = projectIdToSend
+    const res = await rpc.call<ScheduleBoardV1>('schedule.plan', payload)
     if (res.ok) {
-      setBoard(res.data)
+      const next = boardEntries(res.data)
+      if (next) setEntries(next)
+      else void loadBoard()
       setNotice({ tone: 'ok', text: tf('savedNotice', { date }) })
       if (recordUndo) setUndoStack((stack) => pushUndo(stack, { kind: 'plan', ref, date, prevDate: previous?.date }))
       setSelectedRef(undefined)
@@ -455,7 +486,10 @@ export function ScheduleMainPage({
     const previous = entries.find((entry) => entry.ref === ref)
     const res = await rpc.call<ScheduleBoardV1>('schedule.clear', { ref })
     if (res.ok) {
-      setBoard(res.data)
+      if (previous) clearedProjectRef.current.set(ref, entryProjectId(previous))
+      const next = boardEntries(res.data)
+      if (next) setEntries(next)
+      else void loadBoard()
       setNotice({ tone: 'neutral', text: tf('clearedNotice', { ref }) })
       if (recordUndo && previous) setUndoStack((stack) => pushUndo(stack, { kind: 'clear', ref, date: previous.date }))
     } else {
@@ -490,7 +524,7 @@ export function ScheduleMainPage({
     const sourceKind = source?.kind ?? 'element'
     if (entry.kind === 'plan' && entry.prevDate) await plan(entry.ref, entry.prevDate, sourceLabel, sourceKind, false)
     else if (entry.kind === 'plan') await clearOne(entry.ref, false)
-    else if (entry.date) await plan(entry.ref, entry.date, sourceLabel, sourceKind, false)
+    else if (entry.date) await plan(entry.ref, entry.date, sourceLabel, sourceKind, false, clearedProjectRef.current.get(entry.ref))
   }
 
   const goTo = (day: string) => {
@@ -578,6 +612,11 @@ export function ScheduleMainPage({
           </PillButton>
         ) : null}
       </div>
+      {legacyCount > 0 ? (
+        <p className="mw-sched-legacy" data-muweave-schedule-legacy={legacyCount}>
+          {tf('legacyEntriesHint', { count: String(legacyCount) })}
+        </p>
+      ) : null}
       <p className="mw-dsh-muted">{t('backlogHint')}</p>
       {backlogEmpty ? (
         <EmptyState icon="inbox">
@@ -749,9 +788,11 @@ export function ScheduleMainPage({
                           <span className="mw-sched-day">{Number(date.slice(8, 10))}</span>
                           <ul className="mw-sched-chips">
                             {rows.map((row) => {
-                              const ownership = project ? ownershipByRef.get(row.ref) : undefined
+                              const scope = project ? scopeByRef.get(row.ref) : undefined
+                              const ownership = scope?.ownership
+                              const inferred = scope?.basis === 'inferred'
                               const suffix = ownership === 'unknown' ? t('unknownChipSuffix') : ownership === 'others' ? t('othersChipSuffix') : undefined
-                              const title = [row.label, row.note, suffix].filter(Boolean).join(' · ')
+                              const title = [row.label, row.note, suffix, inferred ? t('inferredChipSuffix') : undefined].filter(Boolean).join(' · ')
                               return (
                                 <li key={row.ref}>
                                   <button
@@ -760,6 +801,7 @@ export function ScheduleMainPage({
                                     title={title}
                                     data-kind={kindLabel(row.kind)}
                                     data-ownership={ownership}
+                                    data-basis={scope?.basis}
                                     data-tone={project ? chipTone(ownership, date < today) : date < today ? 'warn' : 'neutral'}
                                     onKeyDown={(ev) => {
                                       if (ev.key !== 'Enter' && ev.key !== 'Delete' && ev.key !== 'Backspace') return
@@ -772,7 +814,8 @@ export function ScheduleMainPage({
                                       void clearOne(row.ref)
                                     }}
                                   >
-                                    {row.label}
+                                    <span className="mw-sched-chip-label">{row.label}</span>
+                                    {inferred ? <span className="mw-sched-chip-basis">{t('inferredChipMark')}</span> : null}
                                   </button>
                                 </li>
                               )
@@ -787,6 +830,11 @@ export function ScheduleMainPage({
                   {monthUnknown > 0 ? (
                     <p className="mw-dsh-muted" data-muweave-schedule-unknown={monthUnknown}>
                       {t('unknownOwnershipHint')} · {monthUnknown}
+                    </p>
+                  ) : null}
+                  {monthInferred > 0 ? (
+                    <p className="mw-dsh-muted" data-muweave-schedule-inferred={monthInferred}>
+                      {t('inferredOwnershipHint')} · {monthInferred}
                     </p>
                   ) : null}
                   <p className="mw-dsh-muted mw-sched-legend">{t('legendHint')} · {t('dayNavHint')}</p>
