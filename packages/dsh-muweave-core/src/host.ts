@@ -31,6 +31,8 @@ import {
   stampHost,
   validateIncomingRpcBody,
   type AllowlistedCliCardDefV1,
+  type DiagnosisFindingV1,
+  type DiagnosisReportV1,
   type MuweaveDomain,
   type MuweaveElementKind,
   type MuweaveSourceOwner,
@@ -39,6 +41,7 @@ import {
   type TemplateCatalogEntryV1,
   type TimingProjectionSnapshotV1,
   type TimingSpanProjectionV1,
+  type TimingSpanStatus,
   type WorkspaceSummaryView,
 } from './protocol'
 import { CapabilityService } from './capabilities/service'
@@ -225,6 +228,27 @@ function containedByRoot(candidate: string, root: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
 }
 
+function workspaceOwnerMarkerPresent(
+  workspace: { dir: string },
+  marker: keyof WorkspaceSummaryView['ownerMarkers'],
+): boolean {
+  if (marker === 'scaena') return existsSync(path.join(workspace.dir, '.scaena', 'project.json'))
+  return existsSync(path.join(workspace.dir, `.${marker}`))
+}
+
+function projectCreateWorkspaceIds(payload: Record<string, unknown>): string[] {
+  if (Array.isArray(payload.workspaceIds)) return payload.workspaceIds as string[]
+  if (Array.isArray(payload.workspaceRefs)) return payload.workspaceRefs as string[]
+  return []
+}
+
+function operationNextAction(status: TimingSpanStatus): TimingSpanProjectionV1['nextAction'] {
+  if (status === 'reconcile_required' || status === 'unknown') return 'reconcile_original'
+  if (status === 'waiting_approval') return 'approve'
+  if (status === 'waiting_for_human') return 'human_review'
+  return 'none'
+}
+
 function safeRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const stripped = stripHostPaths(value)
@@ -296,6 +320,7 @@ export class CreatorHostService {
   private readonly defaultWorkspaceId: string
   private readonly hostInstanceId = randomUUID()
   private readonly ledgerDiagnostics: string[] = []
+  private readonly invalidOperationWorkspaceIds = new Set<string>()
   private readonly capabilities: CapabilityService
   /** Publishing board; its own file, so a bad schedule never touches the job ledger. */
   private readonly schedule: ScheduleStore
@@ -355,6 +380,12 @@ export class CreatorHostService {
         const op = this.validOperation(raw)
         if (!op) {
           this.ledgerDiagnostics.push('skipped_invalid_operation')
+          if (typeof raw === 'object' && raw !== null) {
+            const candidate = raw as { workspaceId?: unknown; status?: unknown }
+            if (typeof candidate.workspaceId === 'string' && typeof candidate.status === 'string' && !OPERATION_STATUSES.has(candidate.status)) {
+              this.invalidOperationWorkspaceIds.add(candidate.workspaceId)
+            }
+          }
           continue
         }
         const scopeKey = `${op.workspaceId}:${op.owner}:${op.action}:${op.idempotencyKey}`
@@ -650,6 +681,187 @@ export class CreatorHostService {
       }
       throw err
     }
+  }
+
+  private async diagnoseProject(project: {
+    id: string
+    title: string
+    workspaceRefs: string[]
+    ownerBindings: Array<{
+      workspaceId: string
+      owner: 'eikona' | 'auctra' | 'scaena' | 'pi'
+      bindingState: 'bound' | 'uninitialized' | 'unavailable' | 'conflict'
+    }>
+    lastObservedRevisions?: Record<string, string>
+  }, registryCorrupt: boolean): Promise<DiagnosisReportV1> {
+    const findings: DiagnosisFindingV1[] = []
+    let uncertain = false
+    const observedIndexes = new Map<string, { revision: string; ownerStates: Record<string, string> }>()
+    const ownerUnavailable = new Set<string>()
+    const ownerMarkers: Record<'eikona' | 'auctra' | 'scaena' | 'pi', keyof WorkspaceSummaryView['ownerMarkers']> = {
+      eikona: 'eikona',
+      auctra: 'auctra',
+      scaena: 'scaena',
+      pi: 'pi',
+    }
+    const owners = ['eikona', 'auctra', 'scaena', 'pi'] as const
+
+    const addOwnerUnavailable = (workspaceId: string, owner: (typeof owners)[number], detail: string) => {
+      const key = `${workspaceId}/${owner}`
+      if (ownerUnavailable.has(key)) return
+      ownerUnavailable.add(key)
+      findings.push({
+        code: 'owner_unavailable',
+        severity: 'warn',
+        detail,
+        action: 'Retry the owner read, or reconcile the original operation if an operation reference is available.',
+      })
+    }
+
+    if (registryCorrupt) {
+      findings.push({
+        code: 'registry_corrupt',
+        severity: 'error',
+        detail: 'The project registry could not be loaded and was isolated for inspection.',
+        action: 'Inspect the isolated registry backup, then run project.diagnose again.',
+      })
+    }
+
+    for (const workspaceId of project.workspaceRefs) {
+      const workspace = this.workspaces.get(workspaceId)
+      if (!workspace) {
+        // A registry reference without a registered workspace is not enough evidence to call it missing.
+        // It is an inability to determine health, so it must never become healthy.
+        uncertain = true
+        continue
+      }
+      const bundleFile = path.join(muweaveRoot(workspace.dir), 'bundle.v1.json')
+      if (!existsSync(bundleFile)) {
+        findings.push({
+          code: 'bundle_missing',
+          severity: 'error',
+          detail: `Workspace ${workspaceId} has no .muweave/bundle.v1.json.`,
+          action: 'Run bundle.sync for this workspace, then run project.diagnose again.',
+        })
+        continue
+      }
+
+      try {
+        const manifest = await readBundleManifestFromDisk(workspace.dir)
+        const index = await readBundleIndexFromDisk(workspace.dir)
+        const ownerStates = index.ownerStates as Record<string, string>
+        observedIndexes.set(workspaceId, { revision: String(index.revision), ownerStates })
+
+        // A readable but internally divergent bundle cannot prove a healthy project.
+        if (manifest.projectId !== index.projectId || manifest.revision !== index.revision) uncertain = true
+
+        for (const owner of owners) {
+          const state = ownerStates[owner]
+          if (state === 'unavailable') {
+            addOwnerUnavailable(workspaceId, owner, `Owner ${owner} is unavailable in workspace ${workspaceId}.`)
+          } else if (state === 'uninitialized_owner' && project.ownerBindings.some((binding) => binding.workspaceId === workspaceId && binding.owner === owner)) {
+            addOwnerUnavailable(workspaceId, owner, `Owner ${owner} is not initialized in workspace ${workspaceId}.`)
+          }
+        }
+
+        for (const binding of project.ownerBindings) {
+          if (binding.workspaceId !== workspaceId) continue
+          if (binding.bindingState === 'unavailable' || binding.bindingState === 'uninitialized') {
+            addOwnerUnavailable(workspaceId, binding.owner, `Owner ${binding.owner} is marked unavailable for workspace ${workspaceId}.`)
+          }
+          if (binding.bindingState === 'conflict') {
+            findings.push({
+              code: 'revision_conflict',
+              severity: 'warn',
+              detail: `Owner ${binding.owner} has a conflicting binding revision in workspace ${workspaceId}.`,
+              action: 'Reload bundle.status and retry only after confirming the current revision.',
+            })
+          }
+          if (!workspaceOwnerMarkerPresent(workspace, ownerMarkers[binding.owner])) {
+            addOwnerUnavailable(workspaceId, binding.owner, `Owner ${binding.owner} marker is unavailable in workspace ${workspaceId}.`)
+          }
+        }
+      } catch {
+        // A present bundle whose manifest/index cannot be read is not equivalent to a missing bundle.
+        // The cause is unknown; keep the report unknown rather than claiming success.
+        uncertain = true
+      }
+    }
+
+    for (const [revisionKey, expected] of Object.entries(project.lastObservedRevisions ?? {})) {
+      const separator = revisionKey.lastIndexOf('/')
+      if (separator <= 0) {
+        uncertain = true
+        continue
+      }
+      const workspaceId = revisionKey.slice(0, separator)
+      const owner = revisionKey.slice(separator + 1)
+      const observed = observedIndexes.get(workspaceId)
+      if (!observed) continue
+      if (observed.revision !== expected) {
+        findings.push({
+          code: 'revision_conflict',
+          severity: 'warn',
+          detail: `Workspace ${workspaceId} revision changed from ${expected} to ${observed.revision}.`,
+          action: 'Reload bundle.status, confirm the current revision, and retry the binding or claim.',
+        })
+      }
+      // Keep the owner component in the machine-readable key validation path without exposing host data.
+      if (owner && !owners.includes(owner as (typeof owners)[number])) uncertain = true
+    }
+
+    for (const operation of this.operations.values()) {
+      if (!['unknown', 'reconcile_required'].includes(operation.status)) continue
+      if (!project.workspaceRefs.includes(operation.workspaceId)) continue
+      findings.push({
+        code: 'unknown_operation',
+        severity: 'error',
+        detail: `Operation ${operation.operationRef} (${operation.action}) remains ${operation.status}.`,
+        action: 'Call operation.reconcile with the original operation reference; do not retry the mutation yet.',
+      })
+      uncertain = true
+    }
+    for (const workspaceId of this.invalidOperationWorkspaceIds) {
+      if (!project.workspaceRefs.includes(workspaceId)) continue
+      findings.push({
+        code: 'unknown_operation',
+        severity: 'error',
+        detail: `An operation record for workspace ${workspaceId} had an unrecognized status.`,
+        action: 'Inspect the operation ledger and reconcile the original operation before retrying.',
+      })
+      uncertain = true
+    }
+
+    // Project exists and no findings is healthy. Warnings are warning and errors are broken.
+    // However, any unreadable or otherwise indeterminate evidence wins: unknown must never be healthy.
+    let state: DiagnosisReportV1['state']
+    if (uncertain) state = 'unknown'
+    else if (findings.some((finding) => finding.severity === 'error')) state = 'broken'
+    else if (findings.some((finding) => finding.severity === 'warn')) state = 'warning'
+    else state = 'healthy'
+    return { projectId: project.id, title: project.title, state, findings }
+  }
+
+  private async diagnoseProjects(projectId?: string): Promise<{ reports: DiagnosisReportV1[] }> {
+    const snapshot = this.projects.diagnosticSnapshot(projectId)
+    if (snapshot.projects.length === 0 && snapshot.registryCorrupt) {
+      return {
+        reports: [{
+          projectId: 'registry',
+          title: 'Project registry',
+          state: 'broken',
+          findings: [{
+            code: 'registry_corrupt',
+            severity: 'error',
+            detail: 'The project registry could not be loaded and was isolated for inspection.',
+            action: 'Inspect the isolated registry backup, then run project.diagnose again.',
+          }],
+        }],
+      }
+    }
+    const reports = []
+    for (const project of snapshot.projects) reports.push(await this.diagnoseProject(project, snapshot.registryCorrupt))
+    return { reports }
   }
 
   private async dispatchRpcAction(action: string, payload: Record<string, unknown>): Promise<RpcEnvelope<unknown>> {
@@ -983,16 +1195,24 @@ export class CreatorHostService {
         return rpcOk(this.generation, this.projects.list(payload.includeArchived === true))
       }
 
+      case 'project.diagnose': {
+        try {
+          if (payload.projectId !== undefined && typeof payload.projectId !== 'string') {
+            throw new ProjectInputError('muweave/invalid_project_id', 'projectId must be a string')
+          }
+          return rpcOk(this.generation, await this.diagnoseProjects(typeof payload.projectId === 'string' ? payload.projectId : undefined))
+        } catch (err) {
+          if (err instanceof ProjectInputError) return rpcFail(this.generation, err.code, err.message, { retryable: false, ...(err.details ? { details: err.details } : {}) })
+          throw err
+        }
+      }
+
       case 'project.create': {
         try {
           const project = this.projects.create({
             title: typeof payload.title === 'string' ? payload.title : '',
             status: typeof payload.status === 'string' ? (payload.status as never) : undefined,
-            workspaceIds: Array.isArray(payload.workspaceIds)
-              ? (payload.workspaceIds as string[])
-              : Array.isArray(payload.workspaceRefs)
-                ? (payload.workspaceRefs as string[])
-                : [],
+            workspaceIds: projectCreateWorkspaceIds(payload),
           })
           this.bumpGeneration()
           // `{ project }` keeps create symmetric with archive/restore/activate and with clone.
@@ -1272,14 +1492,7 @@ export class CreatorHostService {
             elapsedMs: Math.max(0, endMs - startedMs),
             idempotencyKey: op.idempotencyKey,
             ...(op.errorCode ? { blockerReason: op.errorCode } : {}),
-            nextAction:
-              op.status === 'reconcile_required' || op.status === 'unknown'
-                ? 'reconcile_original'
-                : op.status === 'waiting_approval'
-                  ? 'approve'
-                  : op.status === 'waiting_for_human'
-                    ? 'human_review'
-                    : 'none',
+            nextAction: operationNextAction(op.status),
           }
         })
         const snapshot: TimingProjectionSnapshotV1 = {

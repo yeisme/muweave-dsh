@@ -2,6 +2,7 @@
 
 > 交付日期：2026-11-20
 > 依据：`project-features-next.md` 的 F2 一节
+> v8 状态基线：`desk-v8-spec.md` 的结构线与功能线交付清单。
 > 实施：pi（`project.claim` RPC）+ Claude（认领向导 UI），我收口验证
 > 前置：F1 已交付（`cdb732c`）
 

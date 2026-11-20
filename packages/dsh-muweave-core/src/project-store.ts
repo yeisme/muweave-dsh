@@ -212,6 +212,32 @@ export class ProjectStore {
   get(projectId: string): ProjectRecordV1 | undefined {
     return this.projects.find((project) => project.id === projectId);
   }
+
+  /**
+   * Read-only input for project.diagnose. In particular, this never calls persist(),
+   * so a diagnosis cannot change projects.v1.json or its mtime.
+   */
+  diagnosticSnapshot(projectId?: string): {
+    projects: ProjectRecordV1[];
+    registryCorrupt: boolean;
+  } {
+    if (projectId !== undefined) {
+      const project = this.get(projectId);
+      if (!project)
+        throw new ProjectInputError(
+          "muweave/project_not_found",
+          "Project not found",
+        );
+      return {
+        projects: [project],
+        registryCorrupt: Boolean(this.corruptFile),
+      };
+    }
+    return {
+      projects: [...this.projects],
+      registryCorrupt: Boolean(this.corruptFile),
+    };
+  }
   create(input: {
     title: string;
     status?: ProjectStatus;

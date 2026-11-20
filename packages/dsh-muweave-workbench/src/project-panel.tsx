@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { MuweaveRpcClient, MuweaveTranslator } from '@yeisme/dsh-muweave-core/client'
 import { BindingInspector, type OwnerBindingRow } from './binding-inspector'
 import { ClaimWizard, discoverClaimCandidates, type ClaimCandidate, type ClaimedProject } from './claim-wizard'
+import { DiagnosisPanel, type DiagnosisReport } from './diagnosis-panel'
 
 type ProjectStatus = 'preparing' | 'in_production' | 'ready_to_publish' | 'published' | 'archived'
 export interface ProjectRow { id: string; title: string; status: ProjectStatus; archived: boolean; workspaceRefs: string[]; updatedAt: string; ownerBindings?: OwnerBindingRow[] }
@@ -121,6 +122,12 @@ export function ProjectPanel({
     await load()
     onActivate(result.data.project)
   }
+  /** F3: a diagnosis action only navigates — it switches to the reported project and closes the popover. */
+  const goToDiagnosed = async (report: DiagnosisReport) => {
+    const project = projects.find((row) => row.id === report.projectId)
+    if (project && project.id !== activeProjectId) await activate(project)
+    setOpen(false)
+  }
   const restore = async (project: ProjectRow) => { const result = await rpc.call<{ project: ProjectRow }>('project.restore', { projectId: project.id, idempotencyKey: 'restore-' + project.id + '-' + project.updatedAt }); if (result.ok) await load() }
   const active = projects.find((project) => project.id === activeProjectId)
   const claimCount = claimCandidates?.length ?? 0
@@ -179,6 +186,7 @@ export function ProjectPanel({
     {/* F1: the selected project's owner bindings, read from the project.list row above. */}
     {active ? <BindingInspector key={active.id} rpc={rpc} project={active} onChanged={load} /> : null}
     {claimEntry}
+    <DiagnosisPanel rpc={rpc} onNavigate={(report) => void goToDiagnosed(report)} />
   </section>
 
   if (unsupported) {

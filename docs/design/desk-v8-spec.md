@@ -1,7 +1,8 @@
-# MuWeave 工作台 v8 Spec：任务、美化与收尾
+# MuWeave 工作台 v8 Spec：交付状态与后续待做
 
-> 状态：P0/P1 已交付（`49e1f72`、`1e196c3`），本 spec 覆盖 P2/P3 与全量收尾
-> 调研限制：`web_search` 因 API 余额不足（HTTP 402）不可用；以下引用均来自 `web_fetch` 实际取到的正文。
+> 状态：v8 P0、P1、P2，M1-M4，F1、F2 已交付。F3 与项目管理架构 P2 的剩余项待做。
+> 事实依据：每项已交付状态都对应下表中的提交号或文件路径。
+> 调研限制：`web_search` 因 API 余额不足（HTTP 402）不可用。以下 NN/g 引用均来自 `web_fetch` 实际取到的正文。
 
 ## 1. 市场调研（可引用依据）
 
@@ -56,89 +57,62 @@ v8 的检验：
 - 没有抓取到任何竞品的实际截图或交互规格
 - 因此**本 spec 不包含竞品功能对比表**，不编造
 
-## 2. 任务清单（P2 + P3）
+## 2. 任务清单与验收状态
 
-### P2：键盘导航与加速器
+下表只记录当前真实状态。✅ 项带提交号，⬜ 项是未交付工作。
 
-按 NN/g 1.3 的三条约束：
+### 2.1 结构线
 
-| 键 | 行为 | 鼠标替代路径（必须有） |
+| 项目 | 状态 | 可核实内容 |
 | --- | --- | --- |
-| `c` | 对当前 L1 主产物执行「对比基线」 | 「对比基线」按钮 |
-| `j` / `k` | 阶段纵轴上下移动 | 点击阶段行 |
-| `G` + `1..5` | 跳到第 N 阶段 | 点击阶段行 |
-| `Tab` / `Shift+Tab` | 在纵轴 → L1 → L2 → L3 → 检查器之间移动 | 点击 |
-| `Esc` | 退出对比 / 关闭抽屉 | `×` 按钮 |
+| P0 阶段纵轴与三级密度 | ✅ 已交付（`49e1f72`） | `stage-axis.tsx`、`stage-workbench.tsx`、`stage-map.ts` 与对应测试已加入 |
+| P1 版本条与并排对比 | ✅ 已交付（`1e196c3`） | 对比栏出真实缩略图、差异摘要、变体入口和 Esc/关闭路径 |
+| P2 键盘导航与窄屏适配 | ✅ 已交付（`fb4414e`） | `j/k`、`G+1..5`、`c`、Tab、Esc 和 1440/1024/768/390 视口适配已实现 |
+| P3 死代码核查 | ✅ 已交付（`fb4414e`、`f2560d7`） | `DramaSessionView` 已核实为真实挂载代码并保留，`useTilt` 与 `useParallax` 两个死 hook 已删除 |
 
-**内联提示**：键位提示按 NN/g 建议放在操作旁、样式区分（`mw-stage-axis-keys` 已有 `j k` 提示，扩展到全局）。
-**平台化**：`⌘`/`Ctrl` 已由 `formatKeyHint` 处理（`65e3b74`）。
+### 2.2 动效线
 
-### P3：清死代码
-
-| 对象 | 判定（已核实） | 动作 |
+| 项目 | 状态 | 可核实内容 |
 | --- | --- | --- |
-| `DramaSessionView`（`session-view.tsx`） | **活代码，不能删** | **保留** |
-| `ToolRunCard` | 已接进生成台任务列表（`generation.tsx:305`） | 保留 |
-| `ProjectPanel` | 已挂项目条 | 保留 |
+| M1 阶段切换 | ✅ 已交付（`f2560d7`） | 阶段工作区使用受 reduced-motion 约束的淡入 |
+| M2 变体悬停 | ✅ 已交付（`f2560d7`） | 变体 hover 使用受时长约束的轻微缩放与边线反馈 |
+| M3 对比栏进入 | ✅ 已交付（`f2560d7`） | 对比栏使用水平进入动画，reduced-motion 下关闭 |
+| M4 L3 待办出席 | ✅ 已交付（`f2560d7`） | 队列采用有限 stagger，长列表不累积延迟 |
 
-### 结论修正（2026-11-19，我原本写错了）
+### 2.3 功能线
 
-本 spec 初稿写的是「`DramaSessionView` 只被导出、零挂载，应删除」。**这是错的**，依据是我用 `grep 'packages/*/src/*.tsx'` 这个 glob 搜索——它匹配不到 `packages/dsh-muweave-core/src/client/` 的深度，所以什么都没搜到，我误判成零引用。
+| 项目 | 状态 | 可核实内容 |
+| --- | --- | --- |
+| F1 绑定维护与四种派生分组 | ✅ 已交付（`cdb732c`；见 [f1-delivery.md](./f1-delivery.md)） | 绑定检查器支持替换/解绑，分组按场次、角色、状态、素材派生 |
+| F2 旧 bundle 认领向导 | ✅ 已交付（`866ec4d`；见 [f2-delivery.md](./f2-delivery.md)） | 发现未登记 bundle 并用原 `projectId` 登记，认领不改写 bundle |
+| F3 项目诊断 | ⬜ 未交付（见 [f3-spec.md](./f3-spec.md)） | 需要统一五类异常状态、只读诊断契约和可点击下一步 |
 
-实际引用（用 `grep -rn` 直搜目录核实）：
+## 3. 已核实的实现边界
 
-| 位置 | 用途 |
-| --- | --- |
-| `core/src/client/index.tsx:27,451` | import + **真实挂载**（「做剧」会话视图） |
-| `drama/src/client.tsx` | 传入该视图的 props |
-| `scripts/inner-e2e-runner.mjs:638-640` | e2e 断言 `[data-muweave-session-view]` 可见并检查「制作进度」分组 |
-| `tests/theater.test.tsx`、`tests/tool-catalog-ui.test.tsx` | 3 项测试直接渲染它 |
+- `DramaSessionView` 是活代码。`packages/dsh-muweave-core/src/client/index.tsx` 真实挂载它，`packages/dsh-muweave-drama/src/client.tsx` 传入 props，测试与 e2e 也覆盖它。该事实由 `fb4414e` 的核查记录确认。
+- F1 的分组是前端派生，不写 registry、不写 `.muweave/index.v1.json`、不增加 bundle revision。实现位于 `packages/dsh-muweave-workbench/src/stage-map.ts`，交付事实见 `cdb732c`。
+- F2 的 `project.claim` 使用 bundle 原有 `projectId`。`packages/dsh-muweave-core/src/host.ts` 会读取 manifest 并拒绝不一致的 ID，交付事实见 `866ec4d`。
+- 未知操作仍必须进入核对流程。现有 `TimingSpanStatus` 含 `unknown` 与 `reconcile_required`，`operation.reconcile` 是既有 RPC。F3 不能把 HTTP 200、`ok=true`、缓存或发起请求当成健康。
 
-照原 spec 删掉会**破坏 e2e 与 3 项测试**。
+## 4. 后续待做
 
-**教训**：本仓库的源码深度是 `packages/<pkg>/src/client/`，任何 `packages/*/src/*.tsx` 形式的 glob 都搜不到文件。一律用 `grep -rn <pattern> packages/`。
+### 4.1 F3 项目诊断
 
-## 3. 美化收尾（全量）
+新增只读 `project.diagnose`，将注册表损坏、bundle 缺失、owner unavailable、revision conflict 和 unknown operation 映射为稳定的 `state`、`code`、`nextAction` 与安全展示字段。详细契约、动作边界和机器验收见 [f3-spec.md](./f3-spec.md)。
 
-### 3.1 视觉一致性审计
+### 4.2 项目管理架构 P2 剩余项
 
-逐项核对，不靠感觉：
+`docs/design/project-management-arch.md` 的 P2 仍保留两项设计工作。
 
-| 检查 | 方法 |
-| --- | --- |
-| 所有颜色来自 `--mw-*` | `styles-static.test.ts` 已有断言 |
-| 所有长度是 rem（1px/2px 例外） | 同上 |
-| 无内联样式（`--mw-*` 例外） | 同上 |
-| 阶段纵轴与 L1/L2/L3 的间距一致 | 目测 + 量 `getBoundingClientRect` |
-| 三档分屏（single/horizontal/vertical）下都不溢出 | Playwright 三个视口各截一次 |
-| `prefers-reduced-motion` 下无动画 | 用 `emulateMedia` 验证 |
+- 注册表迁移报告仍未交付。当前已交付 F1/F2 的提交和代码没有实现迁移报告入口。
+- `schedule v2` 仍是设计预留。当前实现继续使用 `schedule.v1.json` 和既有 `schedule.list/plan/clear`，没有 v2 契约。
 
-### 3.2 窄屏（1024 / 768 / 390）
+上述两项与 F3 是不同交付物，不能以 F1 或 F2 的完成替代。
 
-现有 e2e 已覆盖四档视口。v8 新增的阶段纵轴在 1024 下会挤压工作面，需要：
-- 1024：纵轴收窄到 9rem，阶段名可能截断 → 用 `title` 补全
-- 768 及以下：纵轴折叠成一个横向 chips 行，置于工作面顶部
+## 5. 事实与判断
 
-### 3.3 空态与降级
+**事实** 是提交号、文件路径和 arch 文档中已写明的 RPC/状态。**判断** 是本 spec 对主入口和后续顺序的归纳。判断部分不改变已发布 RPC、bundle schema 或 owner 边界。
 
-| 场景 | 期望 |
-| --- | --- |
-| 无元件 | 「本阶段还没有产物」+ 去同步按钮 |
-| 无 cover | 「暂无封面」占位（已有） |
-| 无 slots | 不渲染变体带（已有） |
-| 无 revision | 版本带只显示当前版（已有） |
-| 无项目 | 显示全量、不显示归属标签（已有测试锁定） |
+当前 v8 已交付项的提交级验证记录保留在 `git show --stat <commit>`、对应测试文件和 F1/F2 交付报告中。F3、注册表迁移报告和 schedule v2 没有对应交付提交，因此保持 ⬜。
 
-## 4. 验收标准
-
-| 项 | 门槛 |
-| --- | --- |
-| typecheck | 通过 |
-| `pnpm test` | 基线 150 全绿，且新增 P2 键位测试 |
-| 静态守卫 | 11/11 |
-| build / pack | 通过 |
-| e2e | `passed=true` |
-| 四档视口 | 1440/1024/768/390 均无横向溢出 |
-| 死代码 | `DramaSessionView` 零引用（含样式） |
-| 键盘 | 全流程可不用鼠标走完：看阶段 → 开产物 → 对比 → 审批 |
-| 鼠标 | 每个键位动作都有对应按钮 |
+本轮核对时工作树另有未提交的 F3 相关源文件和测试变更，路径包括 `packages/dsh-muweave-workbench/src/diagnosis-panel.tsx`、`tests/diagnosis-panel.test.tsx` 和 `tests/project-diagnose.test.ts`。它们没有纳入本次文档工程，也没有对应交付提交或本轮验收证据，因此不改变 F3 的 ⬜ 状态。

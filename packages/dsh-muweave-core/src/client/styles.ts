@@ -4790,6 +4790,203 @@ body[data-ds-dark-theme] .mw-ambient > i {
   align-items: center;
   margin-top: var(--mw-s-2);
 }
+
+/* ---------- F3: project diagnosis (docs/design/project-features-next.md F3) ----------
+   Folded to one summary row at the foot of the project popover, under the claim entry. State pills
+   borrow the shared tone map; unknown stays neutral with a hollow dot and a dashed outline so it can
+   never read as healthy. Findings carry a 0.1875rem severity rule on the left. The body fades in over the
+   fast token; the global reduced-motion rule stops it. */
+
+.mw-diag {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+  padding-top: var(--mw-s-2);
+  border-top: 1px solid var(--mw-line);
+}
+
+.mw-diag-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-2);
+  min-height: 2rem;
+  padding: 0 var(--mw-s-2);
+  border: 0;
+  border-radius: var(--mw-r-2);
+  background: transparent;
+  color: var(--mw-label);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--mw-dur-fast) var(--mw-ease-out);
+}
+
+.mw-diag-toggle:hover {
+  background: var(--mw-fill-1);
+}
+
+.mw-diag .mw-dot[data-hollow="true"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--mw-tone);
+}
+
+.mw-diag-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mw-label-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-diag-caret {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-right: 1px solid var(--mw-label-3);
+  border-bottom: 1px solid var(--mw-label-3);
+  transform: rotate(-45deg);
+  transition: transform var(--mw-dur-fast) var(--mw-ease);
+}
+
+.mw-diag-toggle[aria-expanded="true"] .mw-diag-caret {
+  transform: rotate(45deg);
+}
+
+.mw-diag-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+  animation: mw-fade-in var(--mw-dur-fast) var(--mw-ease-out) both;
+}
+
+.mw-diag-empty {
+  margin: 0;
+  padding: var(--mw-s-1) var(--mw-s-2);
+  font-size: 0.8125rem;
+}
+
+.mw-diag-allok {
+  color: var(--mw-label-2);
+}
+
+.mw-diag-list,
+.mw-diag-findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mw-diag-list {
+  border-radius: var(--mw-r-2);
+  box-shadow: inset 0 0 0 1px var(--mw-line);
+}
+
+.mw-diag-project {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-1);
+  padding: var(--mw-s-2);
+}
+
+.mw-diag-project + .mw-diag-project {
+  border-top: 1px solid var(--mw-line);
+}
+
+.mw-diag-line {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-2);
+  min-width: 0;
+}
+
+.mw-diag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.mw-diag-state {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.mw-diag-state[data-tone="neutral"] {
+  background: transparent;
+  outline: 1px dashed var(--mw-line-strong);
+  outline-offset: -1px;
+  color: var(--mw-label-2);
+}
+
+.mw-diag-nofinding {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.mw-diag-findings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-1);
+}
+
+.mw-diag-finding {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  padding: var(--mw-s-1) var(--mw-s-2) var(--mw-s-1) var(--mw-s-3);
+  border-radius: var(--mw-r-2);
+  box-shadow: inset 0.1875rem 0 0 var(--mw-tone);
+  font-size: 0.8125rem;
+}
+
+.mw-diag-detail {
+  color: var(--mw-label);
+  overflow-wrap: anywhere;
+}
+
+.mw-diag-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mw-label-3);
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: start;
+}
+
+button.mw-diag-action {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--mw-line-strong);
+  text-underline-offset: 0.1875rem;
+  transition: color var(--mw-dur-fast) var(--mw-ease-out);
+}
+
+button.mw-diag-action:hover {
+  color: var(--mw-label);
+}
+
+.mw-diag-error {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-2);
+  flex-wrap: wrap;
+  padding: var(--mw-s-2);
+  border-radius: var(--mw-r-2);
+  background: color-mix(in oklch, var(--mw-bad) 10%, transparent);
+  font-size: 0.75rem;
+}
+
+.mw-diag-foot {
+  display: flex;
+  justify-content: flex-end;
+}
 `
 
 interface SharedStyleHolder {

@@ -62,6 +62,33 @@ export interface ProjectClaimResultV1 {
   claimed: true
 }
 
+export type DiagnosisFindingCode =
+  | 'registry_corrupt'
+  | 'bundle_missing'
+  | 'owner_unavailable'
+  | 'revision_conflict'
+  | 'unknown_operation'
+
+export type DiagnosisFindingSeverity = 'info' | 'warn' | 'error'
+
+export interface DiagnosisFindingV1 {
+  code: DiagnosisFindingCode
+  severity: DiagnosisFindingSeverity
+  detail: string
+  action?: string
+}
+
+export interface DiagnosisReportV1 {
+  projectId: string
+  title: string
+  state: 'healthy' | 'warning' | 'broken' | 'unknown'
+  findings: DiagnosisFindingV1[]
+}
+
+export interface ProjectDiagnoseResultV1 {
+  reports: DiagnosisReportV1[]
+}
+
 export interface ProjectUnbindResultV1 {
   project: ProjectRecordV1
   removed: boolean
@@ -124,6 +151,7 @@ export const RPC_ACTIONS = [
   'project.bind',
   'project.unbind',
   'project.claim',
+  'project.diagnose',
   'project.activate',
   'project.clone',
 ] as const
