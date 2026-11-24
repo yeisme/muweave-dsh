@@ -20,7 +20,7 @@
 
 作为项目负责人，我想在当前项目的绑定检查器中看到每个 workspace/owner 的 ref、最近观察状态和 bundle revision，并能替换或解除一个 ref；我还想按场次、角色、状态或素材类型查看元件，而不让一次视图切换产生新的 bundle 版本。
 
-### 现状与交付事实
+### 现状 → 缺什么 → 怎么补
 
 **文档已有事实**
 
@@ -29,14 +29,14 @@
 - project.bind、project.unbind 已在 RPC allowlist 和 ProjectStore 中存在。当前 host dispatch 直接调用 ProjectStore.bind/unbind，尚未在该分支中串接架构文档要求的 bundle/owner 合同。
 - project-panel.tsx 目前只有项目列表、新建、复制、归档/恢复和初始 owner ref 输入。client.tsx 只有 bundle.bind 的通用绑定表单。
 
-**交付核对**
+**缺什么**
 
 1. 右侧项目检查器没有绑定清单、状态说明、替换和解除操作。
 2. project.bind 的 UI 没有显示或提交 expectedBundleRevision，revision 冲突无法指导用户重载后重试。
 3. 元件工作区没有分组/排序状态，当前 domainFilter 只负责过滤。
 4. 需要把“注册表意图变化”和“bundle 物化变化”显示为两个可观察步骤，避免 UI 把只写 registry 当成 owner 绑定成功。
 
-**现行实现**
+**怎么补**
 
 **我的判断**
 
@@ -90,7 +90,7 @@
 
 作为打开旧工作区的用户，我想确认这个已有 bundle 应登记到哪个项目，并保留它原来的 projectId、revision 和内容；确认前我可以查看冲突，确认后项目列表和元件过滤应与 bundle 对齐。
 
-### 现状与交付事实
+### 现状 → 缺什么 → 怎么补
 
 **文档已有事实**
 
@@ -99,14 +99,14 @@
 - bundle manifest 的 projectId、title、revision 是必填且会被 consumer 校验。
 - 当前 client.tsx 的 projectUnclaimed 只在已选项目没有自己的元素、但工作区回退列表有元素时显示 notice。它不是“未注册 bundle 认领”状态。
 
-**交付核对**
+**缺什么**
 
 1. 没有“bundle 有效但注册表没有同 ID 项目”的触发器和候选列表。
 2. 没有显示 manifest projectId/title/revision 的确认页。
 3. 没有处理同 projectId 多 workspace 冲突的明确选择。
 4. 没有落实“不能静默重写 projectId”的交互边界。
 
-**现行实现**
+**怎么补**
 
 **我的判断**
 
