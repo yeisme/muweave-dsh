@@ -109,10 +109,9 @@ v7 把所有东西都当成 L1，这是「乱」的根源。
 | 结构线 | P3 | 死代码核查与已确认死 hook 清理 | ✅ 已交付（fb4414e、f2560d7） | 活代码保留，已确认死 hook 清理完毕 |
 | 功能线 | F1 | 绑定维护与场次/角色/状态/素材四种派生分组 | ✅ 已交付（cdb732c） | 绑定写入走 project.bind/unbind，分组不增加 bundle revision |
 | 功能线 | F2 | 旧 bundle 认领向导 | ✅ 已交付（866ec4d） | 用原 projectId 登记，认领不改写 bundle |
-| 功能线 | F3 | 项目诊断 | ⬜ 待做 | 五类异常都有稳定状态和可点击下一步，未知不能显示成功 |
+| 功能线 | F3 | 项目诊断 | ✅ 已交付（54d1374） | 五类异常都有稳定状态和可点击下一步，未知不能显示成功 |
 
-F3 完成后还要处理 project-management-arch.md P2 的注册表迁移报告和 schedule v2 设计预留。
-
+F3 已由 54d1374 交付。后续只剩 project-management-arch.md P2 的注册表迁移报告；schedule v2 已由 fadbe67 交付，详见 docs/design/schedule-v2-delivery.md。
 ## 6. 不做
 
 - **不做多窗口/拖拽分屏自由布局**：`stage-split` 已有 single/horizontal/vertical 三档，够用；自由分屏的复杂度远超收益。

@@ -3,7 +3,8 @@
 > 交付日期：2026-11-20
 > 依据：`project-management-arch.md`「与排期板 schedule.v1.json 的关系」
 > 实施：pi（schema + 迁移）+ Claude（前端归属判定），我收口验证
-> 前置：F1/F2/F3 已交付，tag `v0.2.0-v8`
+> 状态：已交付（fadbe67）
+> 前置：F1/F2/F3 已交付，tag v0.2.0-v8
 
 ## 1. 一句话结论
 

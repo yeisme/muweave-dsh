@@ -1,9 +1,9 @@
 # MuWeave 项目功能下一步设计
 
-> 状态横幅：F1 ✅ 已交付（cdb732c） · F2 ✅ 已交付（866ec4d） · F3 ⬜ 待做。
+> 状态横幅：F1 ✅ 已交付（cdb732c） · F2 ✅ 已交付（866ec4d） · F3 ✅ 已交付（54d1374）。
 
 > 范围：F1 绑定维护与派生分组、F2 旧 bundle 认领向导、F3 项目诊断。
-> 本文保留 F1/F2 的设计依据，并作为 F3 的实施设计，不把未提交工作树变更视为交付。
+> 本文保留 F1/F2 的设计依据，并记录 F3 的已交付契约、状态映射和验收边界。
 > 标记约定：**文档已有事实**来自当前架构/spec/实现，**我的判断**是本设计新增的选择。
 
 ## 一页结论
@@ -20,7 +20,7 @@
 
 作为项目负责人，我想在当前项目的绑定检查器中看到每个 workspace/owner 的 ref、最近观察状态和 bundle revision，并能替换或解除一个 ref；我还想按场次、角色、状态或素材类型查看元件，而不让一次视图切换产生新的 bundle 版本。
 
-### 现状 → 缺什么 → 怎么补
+### 现状与交付事实
 
 **文档已有事实**
 
@@ -29,14 +29,14 @@
 - project.bind、project.unbind 已在 RPC allowlist 和 ProjectStore 中存在。当前 host dispatch 直接调用 ProjectStore.bind/unbind，尚未在该分支中串接架构文档要求的 bundle/owner 合同。
 - project-panel.tsx 目前只有项目列表、新建、复制、归档/恢复和初始 owner ref 输入。client.tsx 只有 bundle.bind 的通用绑定表单。
 
-**缺什么**
+**交付核对**
 
 1. 右侧项目检查器没有绑定清单、状态说明、替换和解除操作。
 2. project.bind 的 UI 没有显示或提交 expectedBundleRevision，revision 冲突无法指导用户重载后重试。
 3. 元件工作区没有分组/排序状态，当前 domainFilter 只负责过滤。
 4. 需要把“注册表意图变化”和“bundle 物化变化”显示为两个可观察步骤，避免 UI 把只写 registry 当成 owner 绑定成功。
 
-**怎么补**
+**现行实现**
 
 **我的判断**
 
@@ -90,7 +90,7 @@
 
 作为打开旧工作区的用户，我想确认这个已有 bundle 应登记到哪个项目，并保留它原来的 projectId、revision 和内容；确认前我可以查看冲突，确认后项目列表和元件过滤应与 bundle 对齐。
 
-### 现状 → 缺什么 → 怎么补
+### 现状与交付事实
 
 **文档已有事实**
 
@@ -99,14 +99,14 @@
 - bundle manifest 的 projectId、title、revision 是必填且会被 consumer 校验。
 - 当前 client.tsx 的 projectUnclaimed 只在已选项目没有自己的元素、但工作区回退列表有元素时显示 notice。它不是“未注册 bundle 认领”状态。
 
-**缺什么**
+**交付核对**
 
 1. 没有“bundle 有效但注册表没有同 ID 项目”的触发器和候选列表。
 2. 没有显示 manifest projectId/title/revision 的确认页。
 3. 没有处理同 projectId 多 workspace 冲突的明确选择。
 4. 没有落实“不能静默重写 projectId”的交互边界。
 
-**怎么补**
+**现行实现**
 
 **我的判断**
 
@@ -171,7 +171,7 @@
 
 作为项目负责人，我想在项目检查器看到当前异常的准确状态和下一步操作，尤其在操作超时或 owner 不可用时，我需要知道系统仍然未知，而不是看到一个误导性的成功状态。
 
-### 现状 → 缺什么 → 怎么补
+### 现状与交付事实
 
 **文档已有事实**
 
@@ -181,17 +181,17 @@
 - RPC 错误 envelope 可带 code、retryable、operationRef。operation.reconcile 是未知 owner/CLI 操作的既有入口。
 - TimingSpanStatus 明确包含 unknown 和 reconcile_required，架构要求未知/超时不能重试创建动作。
 
-**缺什么**
+**交付核对**
 
-1. 缺少统一诊断入口和稳定的状态/下一步映射。
-2. registry 损坏、bundle 缺失和 owner unavailable 目前无法在同一检查器中比较。
-3. revision conflict 只有错误消息，没有 expected/current revision 和重试路径。
-4. unknown operation 可能被通用错误 toast 覆盖，用户看不到 operationRef 和 reconcile 入口。
+1. 统一入口为只读 project.diagnose，已由 54d1374 交付。
+2. 五类异常在同一诊断契约中映射为稳定 state/code/nextAction。
+3. revision conflict 显示 expected/current revision，unknown operation 保留 operationRef 与 reconcile 入口。
+4. tests/diagnosis-panel.test.tsx 与 tests/project-diagnose.test.ts 覆盖状态和交互边界。
 
 **我的判断**
 
-**怎么补**
-- 新增只读 project.diagnose RPC，返回 ProjectDiagnosticV1[]。project.list 可继续附带轻量 diagnostics 摘要，但检查器以 project.diagnose 为详细来源。
+**现行实现**
+- 现行实现使用只读 project.diagnose RPC，返回诊断报告。project.list 继续承担项目列表，检查器以 project.diagnose 为详细来源。
 - 诊断状态使用固定枚举，UI 不根据 HTTP 200 或 ok=true 推断成功。只有明确的健康观察才是 healthy；unknown 永远映射为“未知/需核对”。
 - 每条诊断必须同时有机器字段 code/state/nextAction 和用户可读的 message。没有可安全执行的修复时，nextAction=inspect，不伪造“修复完成”。
 
@@ -247,12 +247,11 @@ state=healthy 只允许在 project.diagnose 明确观察到 registry、bundle、
 - operation.reconcile 的结果可能仍未知。诊断卡不能因为按钮点击完成就变绿，必须以原始回执状态为准。
 - 诊断内容只能使用安全 ref、digest、workspace label 和 operationRef，不输出绝对路径、凭据、provider payload 或 owner 私有数据库内容。
 
-## 依赖与顺序
+## 交付顺序与剩余工作
 
-1. **先做 F1 的绑定合同与检查器基础**。F2 认领需要同一套 bundle.status、revision 展示和项目上下文，F3 也需要绑定状态和 revision 作为诊断输入。先把 project.bind/unbind 的物化边界和错误码做稳定，能减少后续三套 UI 各自解释错误。
-2. **再做 F2 认领向导**。认领要求新增 project.claim，并且必须在 F1 已能显示 bundle projectId/revision 后才能让用户做安全确认。
-3. **最后做 F3 诊断聚合与统一状态卡**。诊断会消费 F1/F2 的 revision conflict、unavailable、claim conflict 和 unknown operation 投影，过早实现会重复定义状态。
-4. F1 的纯前端分组函数可以与 F1 绑定检查器并行实现，但验收应在绑定合同完成后统一跑，确保分组切换不会触发任何写 RPC。
+1. F1、F2、F3 已按依赖顺序交付，提交分别为 cdb732c、866ec4d、54d1374。
+2. F1 的纯前端分组函数仍必须保持 view-only，不触发写 RPC。
+3. 后续独立工作是 registry migration report，不能回写 F3 的状态或把 schedule v2 当作未交付预留。
 
 ## 不做清单
 
@@ -261,7 +260,7 @@ state=healthy 只允许在 project.diagnose 明确观察到 registry、bundle、
 - **不把“绑定 registry 意图成功”当成 owner 物化成功**。跨 owner/CLI 的写入可能未知，必须保留 operationRef 并进入诊断。
 - **不自动合并同 projectId 的多个 workspace**。用户必须明确选择 workspace，避免复制 bundle 被误合并。
 - **不在诊断里增加自动覆盖 revision、删除 corrupt 备份或重建 owner 私有目录**。这些动作超出当前安全合同，且无法由只读诊断证明其正确性。
-- **不把排期条目复制进项目记录或为本功能提前引入 schedule v2**。继续使用 schedule.list/plan/clear 和 bundle index 做归属解析，未归属条目保持诊断状态。
+- **不把排期条目复制进项目记录**。schedule v2 已在 fadbe67 以 schedule.v1.json 的可选 projectId 兼容扩展交付，排期仍通过 schedule.list/plan/clear 管理，未归属条目保持诊断状态。
 - **不提供“未知即失败”或“未知即成功”的快捷映射**。未知必须先 reconcile 原操作，直到得到明确回执。
 - **不新增竞品 UI 结论**。Runway、Krea、Weavy、Frame.io 和 Apple HIG 正文本轮未获取，设计只依据本仓库事实与已有本地 spec。
 

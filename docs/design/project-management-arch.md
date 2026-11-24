@@ -232,7 +232,7 @@
 
 ### P2：诊断与长期兼容
 
-- 增加项目诊断、注册表迁移报告和 schedule v2 设计预留。
+- 项目诊断已由 54d1374 交付；注册表迁移报告仍未交付；schedule v2 已由 fadbe67 以 v1 兼容扩展交付。
 - 验收：注册表损坏、bundle 缺失、owner unavailable、revision conflict 和未知 operation 都能显示下一步，不把未知状态标成成功。
 
 ## 测试策略

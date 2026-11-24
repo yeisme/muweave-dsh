@@ -1,6 +1,6 @@
 # MuWeave 工作台 v8 Spec：交付状态与后续待做
 
-> 状态：v8 P0、P1、P2，M1-M4，F1、F2 已交付。F3 与项目管理架构 P2 的剩余项待做。
+> 状态：v8 P0、P1、P2，M1-M4，F1、F2、F3 与 schedule v2 已交付。项目管理架构 P2 只剩注册表迁移报告。
 > 事实依据：每项已交付状态都对应下表中的提交号或文件路径。
 > 调研限制：`web_search` 因 API 余额不足（HTTP 402）不可用。以下 NN/g 引用均来自 `web_fetch` 实际取到的正文。
 
@@ -85,7 +85,7 @@ v8 的检验：
 | --- | --- | --- |
 | F1 绑定维护与四种派生分组 | ✅ 已交付（`cdb732c`；见 [f1-delivery.md](./f1-delivery.md)） | 绑定检查器支持替换/解绑，分组按场次、角色、状态、素材派生 |
 | F2 旧 bundle 认领向导 | ✅ 已交付（`866ec4d`；见 [f2-delivery.md](./f2-delivery.md)） | 发现未登记 bundle 并用原 `projectId` 登记，认领不改写 bundle |
-| F3 项目诊断 | ⬜ 未交付（见 [f3-spec.md](./f3-spec.md)） | 需要统一五类异常状态、只读诊断契约和可点击下一步 |
+| F3 项目诊断 | ✅ 已交付（54d1374；见 [f3-delivery.md](./f3-delivery.md)） | project.diagnose 只读 RPC、五类 finding、unknown 保持核对态，Workbench 诊断面板与测试已加入 |
 
 ## 3. 已核实的实现边界
 
@@ -94,25 +94,23 @@ v8 的检验：
 - F2 的 `project.claim` 使用 bundle 原有 `projectId`。`packages/dsh-muweave-core/src/host.ts` 会读取 manifest 并拒绝不一致的 ID，交付事实见 `866ec4d`。
 - 未知操作仍必须进入核对流程。现有 `TimingSpanStatus` 含 `unknown` 与 `reconcile_required`，`operation.reconcile` 是既有 RPC。F3 不能把 HTTP 200、`ok=true`、缓存或发起请求当成健康。
 
-## 4. 后续待做
+## 4. 后续待做与边界
 
-### 4.1 F3 项目诊断
+### 4.1 F3 项目诊断（已交付）
 
-新增只读 `project.diagnose`，将注册表损坏、bundle 缺失、owner unavailable、revision conflict 和 unknown operation 映射为稳定的 `state`、`code`、`nextAction` 与安全展示字段。详细契约、动作边界和机器验收见 [f3-spec.md](./f3-spec.md)。
+project.diagnose 已在 54d1374 交付。它把注册表损坏、bundle 缺失、owner unavailable、revision conflict 和 unknown operation 映射为稳定的 state、code、nextAction 与安全展示字段。实现证据见 packages/dsh-muweave-core/src/host.ts、packages/dsh-muweave-workbench/src/diagnosis-panel.tsx、tests/diagnosis-panel.test.tsx 与 tests/project-diagnose.test.ts。契约和验收以 f3-spec.md 为准，交付结论见 f3-delivery.md。
 
 ### 4.2 项目管理架构 P2 剩余项
 
-`docs/design/project-management-arch.md` 的 P2 仍保留两项设计工作。
+project-management-arch.md 的 P2 目前只剩一项未交付工作。
 
-- 注册表迁移报告仍未交付。当前已交付 F1/F2 的提交和代码没有实现迁移报告入口。
-- `schedule v2` 仍是设计预留。当前实现继续使用 `schedule.v1.json` 和既有 `schedule.list/plan/clear`，没有 v2 契约。
+- 注册表迁移报告仍未交付，当前没有对应实现入口或提交。
+- schedule v2 已由 fadbe67 交付，采用 schedule.v1.json 的可选 projectId 兼容扩展，不增加 board-level v2 marker。详情见 schedule-v2-delivery.md。
 
-上述两项与 F3 是不同交付物，不能以 F1 或 F2 的完成替代。
+注册表迁移报告与 F3、schedule v2 是独立交付物，不能互相替代。
 
 ## 5. 事实与判断
 
 **事实** 是提交号、文件路径和 arch 文档中已写明的 RPC/状态。**判断** 是本 spec 对主入口和后续顺序的归纳。判断部分不改变已发布 RPC、bundle schema 或 owner 边界。
 
-当前 v8 已交付项的提交级验证记录保留在 `git show --stat <commit>`、对应测试文件和 F1/F2 交付报告中。F3、注册表迁移报告和 schedule v2 没有对应交付提交，因此保持 ⬜。
-
-本轮核对时工作树另有未提交的 F3 相关源文件和测试变更，路径包括 `packages/dsh-muweave-workbench/src/diagnosis-panel.tsx`、`tests/diagnosis-panel.test.tsx` 和 `tests/project-diagnose.test.ts`。它们没有纳入本次文档工程，也没有对应交付提交或本轮验收证据，因此不改变 F3 的 ⬜ 状态。
+当前 v8 已交付项的提交级验证记录保留在 git show --stat <commit>、对应测试文件和交付报告中。F3 的提交是 54d1374，schedule v2 的提交是 fadbe67。注册表迁移报告仍没有对应实现提交，因此保持未交付。历史上曾出现的 F3 工作树草稿已经由 54d1374 纳入提交，不能再作为当前未提交状态描述。

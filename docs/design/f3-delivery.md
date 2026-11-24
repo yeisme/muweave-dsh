@@ -81,7 +81,7 @@ state 配色严格映射：healthy=绿 / warning=黄 / broken=红 / **unknown=�
 
 - **批量修复**：诊断只报告，不提供一键修复（这是有意的：修复需要用户判断）
 - **诊断历史**：不记录「上次诊断时间」，每次展开都实时查
-- **arch P2 剩余**：注册表迁移报告、schedule v2 预留，仍未做
+- **arch P2 剩余**：注册表迁移报告仍未交付；schedule v2 已由 fadbe67 交付，详见 schedule-v2-delivery.md
 
 ## 8. 提交
 

@@ -1,12 +1,12 @@
 # F3 项目诊断实施规格
 
-> 状态：⬜ 待做。F3 是 project-management-arch.md P2 的项目诊断部分。本文是契约与交互规格，不提供实现代码。
+> 状态：✅ 已交付（54d1374）。F3 是 project-management-arch.md P2 的项目诊断部分。本文是已交付契约与交互规格。
 > 标记：提交号和现有 RPC/类型是事实。新增 project.diagnose 的字段、状态映射和交互是本规格的判断。
-> 本轮核对发现工作树存在未提交的 F3 相关实现草稿。该草稿不构成交付事实，本文仍以可提交、可机器验证的契约为准。
+> 实现证据：packages/dsh-muweave-core/src/host.ts、packages/dsh-muweave-workbench/src/diagnosis-panel.tsx、tests/diagnosis-panel.test.tsx、tests/project-diagnose.test.ts。
 
 ## 1. 结论
 
-建议新增只读 project.diagnose RPC，由 host 聚合注册表、bundle、owner readiness、revision 和 operation ledger 的安全投影。前端只负责展示和发起明确的下一步动作，不凭 HTTP 200、ok=true、旧缓存或“请求已发出”推断健康。未知状态必须保持 unknown，不能标成成功。
+已交付只读 project.diagnose RPC，由 host 聚合注册表、bundle、owner readiness、revision 和 operation ledger 的安全投影。前端只负责展示和发起明确的下一步动作，不凭 HTTP 200、ok=true、旧缓存或“请求已发出”推断健康。未知状态必须保持 unknown，不能标成成功。
 
 ## 2. 五类异常状态映射
 
@@ -66,4 +66,4 @@
 - 不用前端 HTTP 状态、缓存或请求发起作为健康证明。
 - 不自动重试未知写操作，不自动覆盖 revision。
 - 不修改 bundle projectId，不删除 owner 原件，不读 owner 私有数据库。
-- 不在 F3 中实现注册表迁移报告或 schedule v2。它们仍是 arch P2 的独立剩余项。
+- 不在 F3 中实现注册表迁移报告。schedule v2 已由 fadbe67 交付，仍与 registry migration report 保持独立边界。

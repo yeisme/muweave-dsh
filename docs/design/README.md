@@ -8,11 +8,12 @@
 | --- | --- | --- | --- |
 | [desk-v8-spec.md](./desk-v8-spec.md) | 现行 | v8 的调研依据、交付清单、验收状态和后续待做项 | 需要核对 P0/P1/P2、M1-M4、F1/F2/F3 或 arch P2 状态时 |
 | [desk-v8-proposal.md](./desk-v8-proposal.md) | 现行 | v8 工作台的结构线与功能线方案及取舍 | 需要理解 v8 为什么按双轨推进时 |
-| [project-features-next.md](./project-features-next.md) | 现行 | F1、F2 已交付与 F3 设计源 | 需要查看项目管理功能的事实、判断和依赖时 |
-| [f3-spec.md](./f3-spec.md) | 现行 | F3 项目诊断的只读契约、异常映射和交互验收 | 需要实施或评审项目诊断时 |
+| [project-features-next.md](./project-features-next.md) | 现行 | F1、F2、F3 的事实、状态映射与剩余边界 | 需要查看项目管理功能的事实、判断和依赖时 |
+| [f3-spec.md](./f3-spec.md) | 现行 | F3 项目诊断的只读契约、异常映射和交互验收 | 需要核对已交付诊断契约或后续评审时 |
 | [project-management-arch.md](./project-management-arch.md) | 现行 | 项目注册表、RPC 边界、P0-P2 架构验收 | 需要核对项目数据边界、错误码和长期兼容预留时 |
+| [tab-room-mapping.md](./tab-room-mapping.md) | 现行 | 7 个剧场 room 与 21 个 stage tab 的源码映射 | 需要核对 room、plugin owner、stage tab ID 或 9-tab 口径时 |
 | [f1-delivery.md](./f1-delivery.md) | 参考（不改） | F1 的实现范围、证据、提交和已知未做项 | 需要核对 F1 已交付事实或验证数字时 |
-| [schedule-v2-delivery.md](./schedule-v2-delivery.md) | 参考（不改） | 排期项目维度的实现范围、legacy 处理与验证数字 | 需要核对排期归属判定依据时 |
+| [schedule-v2-delivery.md](./schedule-v2-delivery.md) | 参考（不改） | 已交付的排期项目维度、legacy 处理与验证数字 | 需要核对排期归属判定依据时 |
 | [f2-delivery.md](./f2-delivery.md) | 参考（不改） | F2 的实现范围、证据、提交和已知未做项 | 需要核对 F2 认领向导事实或验证数字时 |
 | [README.md](./README.md) | 现行 | 本目录的阅读入口和时效性索引 | 进入 docs/design 目录时 |
 
