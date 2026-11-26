@@ -1,4 +1,28 @@
-# MuWeave DSH Creator Plugin Suite (`cli/muweave-dsh`)
+# MuWeave DSH Creator Plugin Suite
+
+仓库：<https://github.com/yeisme/muweave-dsh>（private）
+
+```bash
+git clone https://github.com/yeisme/muweave-dsh.git
+cd muweave-dsh && pnpm install
+```
+
+## 当前状态
+
+| 项 | 现状 |
+| --- | --- |
+| 类型检查 | `pnpm typecheck` 通过（0 错误） |
+| 测试 | 32 个文件 / 245 条测试全过（串行跑） |
+| 打包 | 6 个插件 tarball 产出到 `.work/`（底座 `muweave-bundle`、`dsh-muweave-core` 编译进各插件，不单独打包） |
+| 已知缺口 | 幂等/账本/归因/进度投影/日志五项已修（见 `docs/design/agent-bots-p0-impl-2026-11-26.md`）；bot 编排仍是设计阶段（`docs/design-agent-bots-final-2026-11-26.md`） |
+
+**测试请串行跑**。并发跑会因多个 vitest 进程抢同一个 `localStorage` 文件而随机出现 1 个假失败：
+
+```bash
+mkdir -p temp
+NODE_OPTIONS=--localstorage-file=temp/vitest-$(date +%H%M%S).json \
+  pnpm exec vitest run --no-file-parallelism
+```
 
 面向 DeepSeek Harness（`engines.dsh`: `>=0.2.2-rc.2 <0.3.0`，rc.2 / rc.3 实测） 的幕织（MuWeave）创作辅助插件矩阵与 `.muweave/` 物化信息元件中心。
 
