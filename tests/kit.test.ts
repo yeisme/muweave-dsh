@@ -125,6 +125,10 @@ describe('@yeisme/dsh-muweave-kit PTC preset parity, scoped runtime skills, and 
       expect(s).toMatch(/^[a-z0-9-]+$/)
     }
     expect(registeredTools).toEqual([
+      'muweave_bot_roster',
+      'muweave_task_delegate',
+      'muweave_task_status',
+      'muweave_task_trace',
       'muweave_sync_bundle',
       'muweave_validate_eikona_spec',
       'muweave_capability_catalog',

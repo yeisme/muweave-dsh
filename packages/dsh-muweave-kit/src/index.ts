@@ -6,6 +6,7 @@ import {
   type DshHostContextLike,
 } from '@yeisme/dsh-muweave-core'
 import { validateEikonaGenerationSpec } from '@yeisme/muweave-bundle'
+import { registerBotTools } from './bot-tools'
 
 export const name = '@yeisme/dsh-muweave-kit'
 // Top-level inject stays empty so this module can run both at root (`role: 'host'`) AND inside
@@ -128,6 +129,7 @@ export function apply(ctx: DshHostContextLike, config: MuweaveKitConfig = {}): v
     const toolsSvc = sub.tools as { register(def: Record<string, unknown>): () => void } | undefined
     if (!toolsSvc?.register) return
     const subCtx = sub as { effect?: (fn: () => () => void, label?: string) => void }
+    registerBotTools(toolsSvc, subCtx.effect)
 
     subCtx.effect?.(
       () =>
