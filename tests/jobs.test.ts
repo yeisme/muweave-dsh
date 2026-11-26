@@ -107,6 +107,53 @@ describe('job store, state machine and reconcile', () => {
     expect(c.ok ? '' : c.error.code).toBe('IDEMPOTENCY_CONFLICT')
   })
 
+  it('rechecks the persisted digest after restart and never silently replays an old job', async () => {
+    const dir = await workspace()
+    const svc = await boot(dir, [])
+    const first = await requestJob(svc, 'restart-digest', {}, PROMPT)
+    svc.dispose()
+    const svc2 = await boot(dir, [])
+    const changed = await svc2.handleRpcAction('capability.estimate', { capabilityId: 'eikona.image.generate', input: { prompt: 'changed after restart' }, slots: 1 })
+    const conflict = await svc2.handleRpcAction('job.request', { estimateId: (changed as any).data.estimate.estimateId, idempotencyKey: 'restart-digest', requestedBy: 'ui' })
+    expect(conflict.ok ? '' : conflict.error.code).toBe('IDEMPOTENCY_CONFLICT')
+    expect((conflict as any).data?.job?.jobId).not.toBe(first.jobId)
+  })
+
+  it('replays same key and same estimate digest after restart', async () => {
+    const dir = await workspace()
+    const svc = await boot(dir, [])
+    const estimate = await svc.handleRpcAction('capability.estimate', { capabilityId: 'eikona.image.generate', input: { prompt: PROMPT }, slots: 1 })
+    const estimateId = (estimate as any).data.estimate.estimateId
+    const first = await svc.handleRpcAction('job.request', { estimateId, idempotencyKey: 'restart-same', requestedBy: 'ui' })
+    const firstJob = (first as any).data.job
+    svc.dispose()
+    const svc2 = await boot(dir, [])
+    const replay = await svc2.handleRpcAction('job.request', { estimateId, idempotencyKey: 'restart-same', requestedBy: 'ui' })
+    expect(replay.ok).toBe(true)
+    expect((replay as any).data.job.jobId).toBe(firstJob.jobId)
+  })
+
+  it('keeps trimmed terminal jobs addressable and included in committed budget', async () => {
+    const dir = await workspace()
+    const svc = await bootWith(dir, okSubmit)
+    const first = await requestJob(svc, 'trim-budget')
+    const approved = await approve(svc, first.jobId)
+    expect(approved.ok).toBe(true)
+    const engine = engineOf(svc)
+    engine.require(first.jobId).status = 'cancelled'
+    await engine.persist()
+    for (let i = 0; i < 205; i += 1) {
+      const job = await requestJob(svc, `trim-${i}`, {}, `prompt-${i}`)
+      await rpcOf(svc, 'job.cancel', { jobId: job.jobId })
+    }
+    const replayEstimate = await rpcOf(svc, 'capability.estimate', { capabilityId: 'eikona.image.generate', input: { prompt: PROMPT }, slots: 1 })
+    const replay = await rpcOf(svc, 'job.request', { estimateId: replayEstimate.data.estimate.estimateId, idempotencyKey: 'trim-budget', requestedBy: 'ui' })
+    expect(replay.ok).toBe(true)
+    expect(replay.data.job.jobId).toBe(first.jobId)
+    const budget = await rpcOf(svc, 'budget.status', {})
+    expect(budget.data.lines.find((line: any) => line.unit === 'usd').committed).toBeCloseTo(0.3)
+  })
+
   it('cancels waiting_approval directly and refuses owners without cancel support', async () => {
     const dir = await workspace()
     const svc = await boot(dir, [])

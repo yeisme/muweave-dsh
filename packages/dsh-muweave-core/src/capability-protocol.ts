@@ -138,6 +138,13 @@ export interface JobSlotV1 {
 
 export type JobRequester = 'ui' | 'agent'
 
+export interface JobRequesterRefV1 {
+  botId?: string
+  sessionId?: string
+  taskId?: string
+  parentJobId?: string
+}
+
 export interface JobRecordV1 {
   jobId: string
   workspaceId: string
@@ -146,7 +153,11 @@ export interface JobRecordV1 {
   kind: CapabilityKind
   title: string
   promptDigest: string
+  /** Canonical digest of the idempotent request payload. Optional for pre-P0 records. */
+  payloadDigest?: string
   requestedBy: JobRequester
+  requester?: JobRequesterRefV1
+  traceId?: string
   status: JobStatus
   estimate: CostAmountV1
   approvedCeiling?: CostAmountV1

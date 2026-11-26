@@ -238,6 +238,10 @@ export interface TimingSpanProjectionV1 {
   idempotencyKey?: string
   blockerReason?: string
   nextAction?: 'none' | 'approve' | 'human_review' | 'reconcile_original' | 'inspect'
+  /** Present for job-backed spans. */
+  jobRef?: string
+  taskRef?: string
+  traceId?: string
 }
 
 export interface TimingProjectionSnapshotV1 {

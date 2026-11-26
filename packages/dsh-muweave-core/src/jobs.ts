@@ -20,6 +20,7 @@ export const MAX_JOB_RECORDS = 200
 export const POLL_INTERVAL_MS = 3_000
 /** Scratch request files older than this at startup are leftovers of a dead process. */
 export const STALE_TMP_MS = 5 * 60 * 1000
+const IDEMPOTENCY_SCHEMA = 'muweave.idempotency.v1'
 
 /** Error carrying one of the stable JOB_ERROR_CODES; the RPC layer turns it into an envelope. */
 export class JobError extends Error {
@@ -52,6 +53,8 @@ function validJob(raw: unknown): JobRecordV1 | undefined {
 export interface JobEngineDeps {
   /** Absolute path of jobs.v1.json inside pluginDataDir. */
   file: string
+  /** Optional structured logger supplied by the host. */
+  logger?: (event: string, fields: Record<string, unknown>) => void
   registry: CapabilityRegistry
   adapterContext(workspaceId: string): AdapterContext
   workspaceDir(workspaceId: string): string
@@ -68,6 +71,7 @@ interface PendingInput {
 
 export class JobEngine {
   private readonly jobs = new Map<string, JobRecordV1>()
+  private readonly idempotency = new Map<string, JobRecordV1>()
   /** Prompts live here only (memory) until submit; they are never part of a record. */
   private readonly pending = new Map<string, PendingInput>()
   private readonly tails = new Map<string, Promise<void>>()
@@ -75,6 +79,12 @@ export class JobEngine {
   private timer?: ReturnType<typeof setInterval>
   private ticking = false
   private disposed = false
+  private log(event: string, job?: JobRecordV1, errorCode?: string): void {
+    this.deps.logger?.(event, {
+      ...(job ? { jobRef: job.jobId, taskRef: job.requester?.taskId, traceId: job.traceId } : {}),
+      ...(errorCode ? { errorCode } : {}),
+    })
+  }
   /** Set when jobs.v1.json was unreadable; the original is renamed aside and paid approval stays off. */
   corruptFile?: string
 
@@ -126,13 +136,16 @@ export class JobEngine {
           for (const slot of job.slots) slot.status = 'failed'
           job.updatedAt = new Date().toISOString()
           changed = true
+          this.log('jobs.restart_recovery', job, 'ESTIMATE_EXPIRED')
         } else if (job.status === 'queued' || job.status === 'running') {
           job.status = 'reconcile_required'
           job.nextAction = 'reconcile'
           job.updatedAt = new Date().toISOString()
           changed = true
+          this.log('jobs.restart_recovery', job, 'RECONCILE_REQUIRED')
         }
         this.jobs.set(job.jobId, job)
+        this.idempotency.set(this.idempotencyKey(job.workspaceId, job.idempotencyKey), job)
       }
     } catch {
       this.jobs.clear()
@@ -145,6 +158,21 @@ export class JobEngine {
       }
       return
     }
+    const indexFile = this.idempotencyFile()
+    if (existsSync(indexFile)) {
+      try {
+        const parsed = JSON.parse(readFileSync(indexFile, 'utf8')) as { records?: unknown[] }
+        for (const raw of parsed.records ?? []) {
+          const job = validJob(raw)
+          if (job) {
+            const canonical = this.jobs.get(job.jobId) ?? job
+            this.idempotency.set(this.idempotencyKey(canonical.workspaceId, canonical.idempotencyKey), canonical)
+          }
+        }
+      } catch {
+        this.deps.logger?.('jobs.idempotency_load_failed', { errorCode: 'IDEMPOTENCY_INDEX_UNREADABLE' })
+      }
+    }
     if (changed) {
       const tmp = `${this.deps.file}.tmp.${process.pid}`
       writeFileSync(tmp, this.serialize(), { mode: 0o600 })
@@ -154,6 +182,18 @@ export class JobEngine {
 
   private serialize(): string {
     return JSON.stringify({ schema: JOBS_SCHEMA, jobs: this.trimmed() })
+  }
+
+  private idempotencyFile(): string {
+    return path.join(path.dirname(this.deps.file), 'idempotency.v1.json')
+  }
+
+  private idempotencyKey(workspaceId: string, key: string): string {
+    return `${workspaceId}:${key}`
+  }
+
+  private serializeIdempotency(): string {
+    return JSON.stringify({ schema: IDEMPOTENCY_SCHEMA, records: [...this.idempotency.values()] })
   }
 
   /** Keep every active record; drop the oldest terminal ones past the cap. */
@@ -168,7 +208,6 @@ export class JobEngine {
         excess -= 1
       }
     }
-    for (const id of dropped) this.jobs.delete(id)
     return all.filter((j) => !dropped.has(j.jobId))
   }
 
@@ -180,6 +219,10 @@ export class JobEngine {
       const tmp = `${this.deps.file}.tmp.${process.pid}`
       await writeFile(tmp, body, { mode: 0o600 })
       await rename(tmp, this.deps.file)
+      const indexFile = this.idempotencyFile()
+      const indexTmp = `${indexFile}.tmp.${process.pid}`
+      await writeFile(indexTmp, this.serializeIdempotency(), { mode: 0o600 })
+      await rename(indexTmp, indexFile)
     })
     this.persistTail = run.catch(() => undefined)
     return run
@@ -206,23 +249,32 @@ export class JobEngine {
   // ---------------------------------------------------------------- queries
 
   list(workspaceId?: string): JobRecordV1[] {
-    return [...this.jobs.values()]
+    return this.trimmed()
+      .filter((j) => !workspaceId || j.workspaceId === workspaceId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }
+
+  /** All records needed for idempotency and accounting, including display-trimmed terminal jobs. */
+  all(workspaceId?: string): JobRecordV1[] {
+    const records = new Map<string, JobRecordV1>(this.idempotency)
+    for (const job of this.jobs.values()) records.set(this.idempotencyKey(job.workspaceId, job.idempotencyKey), job)
+    return [...records.values()]
       .filter((j) => !workspaceId || j.workspaceId === workspaceId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
   get(jobId: string): JobRecordV1 | undefined {
-    return this.jobs.get(jobId)
+    return this.jobs.get(jobId) ?? [...this.idempotency.values()].find((job) => job.jobId === jobId)
   }
 
   require(jobId: string): JobRecordV1 {
-    const job = this.jobs.get(jobId)
+    const job = this.get(jobId)
     if (!job) throw new JobError('JOB_NOT_FOUND', 'Job does not exist')
     return job
   }
 
   findByIdempotencyKey(workspaceId: string, key: string): JobRecordV1 | undefined {
-    return this.list(workspaceId).find((j) => j.idempotencyKey === key)
+    return this.idempotency.get(this.idempotencyKey(workspaceId, key))
   }
 
   inputFor(jobId: string): CapabilityInput | undefined {
@@ -235,6 +287,7 @@ export class JobEngine {
 
   async create(job: JobRecordV1, input: CapabilityInput, expiresAtMs: number): Promise<JobRecordV1> {
     this.jobs.set(job.jobId, job)
+    this.idempotency.set(this.idempotencyKey(job.workspaceId, job.idempotencyKey), job)
     this.pending.set(job.jobId, { input, expiresAtMs })
     await this.commit()
     return job
@@ -248,6 +301,7 @@ export class JobEngine {
     await this.withJob(jobId, async () => {
       const job = this.require(jobId)
       if (job.status !== 'waiting_approval') throw new JobError('APPROVAL_REQUIRED', 'Job is not waiting for approval')
+      this.log('jobs.approval_waiting', job, 'APPROVAL_REQUIRED')
       if (!this.inputFor(jobId)) throw new JobError('ESTIMATE_EXPIRED', 'The estimate expired; request a new one')
       if (!this.deps.registry.find(job.capabilityId)) throw new JobError('CAPABILITY_UNAVAILABLE', 'Capability is not registered')
       job.approvedCeiling = ceiling
@@ -304,6 +358,7 @@ export class JobEngine {
   async cancel(jobId: string): Promise<JobRecordV1> {
     return this.withJob(jobId, async () => {
       const job = this.require(jobId)
+      this.log('jobs.cancel_requested', job, 'CANCEL_REQUESTED')
       const adapter = this.deps.registry.find(job.capabilityId)
       if (job.status === 'waiting_approval') {
         this.pending.delete(jobId)
@@ -327,6 +382,7 @@ export class JobEngine {
         else delete job.errorCode
         this.touch(job, 'cancelled')
       } else {
+        this.log('jobs.cancel_rejected', job, 'CAPABILITY_UNAVAILABLE')
         throw new JobError('CAPABILITY_UNAVAILABLE', 'Job cannot be cancelled in its current state')
       }
       await this.commit()
@@ -406,6 +462,7 @@ export class JobEngine {
 
   async reconcile(jobId: string): Promise<JobRecordV1> {
     const job = this.require(jobId)
+    this.log('jobs.reconcile_requested', job, 'RECONCILE_REQUIRED')
     if (job.status !== 'reconcile_required') throw new JobError('OWNER_STATUS_UNKNOWN', 'Job does not need reconciling')
     await this.pollJob(jobId)
     return this.require(jobId)
@@ -452,6 +509,7 @@ export class JobEngine {
   async reviewSlot(jobId: string, slotId: string, decision: 'accept' | 'reject', linkToShot: boolean): Promise<JobRecordV1> {
     const result = await this.withJob(jobId, async () => {
       const job = this.require(jobId)
+      this.log('jobs.slot_review_requested', job)
       const slot = job.slots.find((s) => s.slotId === slotId)
       // Already reviewed: return the current state, never call the owner a second time.
       if (slot && slot.status === 'done' && slot.review !== 'unreviewed') return job

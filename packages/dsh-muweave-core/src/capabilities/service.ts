@@ -1,4 +1,5 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { addShotMediaLink, removeShotMediaLink, validateShotMediaEntry, type CliRunner } from '@yeisme/muweave-bundle'
 import {
@@ -21,6 +22,7 @@ import { deriveTitle, promptDigestOf, type AdapterContext, type CapabilityInput 
 
 export const ESTIMATE_TTL_MS = 15 * 60 * 1000
 const ROLES = ['keyframe', 'reference', 'video', 'voice', 'music', 'sfx']
+const ESTIMATES_SCHEMA = 'muweave.estimates.v1'
 
 export interface CapabilityServiceDeps {
   pluginDataDir: string
@@ -31,12 +33,33 @@ export interface CapabilityServiceDeps {
   syncWorkspace(ws: { id: string; dir: string }): Promise<void>
   env?: NodeJS.ProcessEnv
   pollIntervalMs?: number
+  logger?: (event: string, fields: Record<string, unknown>) => void
 }
 
 class InputError extends Error {}
 
 function str(v: unknown, max = 200): string | undefined {
   return typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : undefined
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function payloadDigest(capabilityId: string, promptDigest: string, slots: number, anchor?: ProductionAnchorV1): string {
+  return `sha256:${createHash('sha256').update(canonicalJson({ capabilityId, promptDigest, slots, anchor: anchor ?? null })).digest('hex')}`
+}
+
+interface PersistedEstimateDigestV1 {
+  estimateId: string
+  workspaceId: string
+  payloadDigest: string
+  expiresAt: string
 }
 
 /** Same opaque-ref rules the bundle applies to shot media entries; anything else is rejected up front. */
@@ -74,8 +97,10 @@ export class CapabilityService {
   /** One global lock around budget check -> queued transition, so two approvals cannot both pass the cap. */
   private budgetTail: Promise<void> = Promise.resolve()
   private readonly estimates = new Map<string, { est: CapabilityEstimateV1; input: CapabilityInput; workspaceId: string }>()
+  private readonly persistedEstimateDigests = new Map<string, PersistedEstimateDigestV1>()
 
   constructor(private readonly deps: CapabilityServiceDeps) {
+    this.loadEstimateDigests()
     this.engine = new JobEngine({
       file: path.join(deps.pluginDataDir, 'jobs.v1.json'),
       registry: this.registry,
@@ -84,7 +109,39 @@ export class CapabilityService {
       onChange: () => deps.bumpGeneration(),
       afterReview: (id) => deps.syncWorkspace(deps.resolveWorkspace(id)),
       ...(deps.pollIntervalMs ? { pollIntervalMs: deps.pollIntervalMs } : {}),
+      logger: deps.logger,
     })
+  }
+
+  private estimatesFile(): string {
+    return path.join(this.deps.pluginDataDir, 'estimates.v1.json')
+  }
+
+  private loadEstimateDigests(): void {
+    const file = this.estimatesFile()
+    if (!existsSync(file)) return
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { records?: unknown[] }
+      for (const raw of parsed.records ?? []) {
+        if (typeof raw !== 'object' || raw === null) continue
+        const record = raw as Partial<PersistedEstimateDigestV1>
+        if (typeof record.estimateId === 'string' && typeof record.workspaceId === 'string' && typeof record.payloadDigest === 'string' && typeof record.expiresAt === 'string') {
+          this.persistedEstimateDigests.set(record.estimateId, record as PersistedEstimateDigestV1)
+        }
+      }
+    } catch {
+      this.deps.logger?.('capability.estimate_digest_load_failed', { errorCode: 'ESTIMATE_DIGEST_INDEX_UNREADABLE' })
+    }
+  }
+
+  private persistEstimateDigest(record: PersistedEstimateDigestV1): void {
+    this.persistedEstimateDigests.set(record.estimateId, record)
+    const records = [...this.persistedEstimateDigests.values()]
+    mkdirSync(this.deps.pluginDataDir, { recursive: true })
+    const file = this.estimatesFile()
+    const temp = `${file}.tmp.${process.pid}`
+    writeFileSync(temp, JSON.stringify({ schema: ESTIMATES_SCHEMA, records }), { mode: 0o600 })
+    renameSync(temp, file)
   }
 
   private ctx(workspaceId?: string): AdapterContext {
@@ -143,6 +200,12 @@ export class CapabilityService {
     }
     this.purgeEstimates()
     this.estimates.set(est.estimateId, { est, input, workspaceId: ws.id })
+    this.persistEstimateDigest({
+      estimateId: est.estimateId,
+      workspaceId: ws.id,
+      payloadDigest: payloadDigest(est.capabilityId, est.promptDigest, est.slots, est.anchor),
+      expiresAt: est.expiresAt,
+    })
     return est
   }
 
@@ -158,11 +221,25 @@ export class CapabilityService {
     const key = str(payload.idempotencyKey, 128)
     const estimateId = str(payload.estimateId, 64)
     if (!key || !estimateId) throw new InputError('estimateId and idempotencyKey are required')
+    const requesterRaw = payload.requester
+    const requester = requesterRaw && typeof requesterRaw === 'object' && !Array.isArray(requesterRaw)
+      ? Object.fromEntries(['botId', 'sessionId', 'taskId', 'parentJobId'].flatMap((field) => {
+          const value = str((requesterRaw as Record<string, unknown>)[field], 160)
+          return value ? [[field, value]] : []
+        }))
+      : undefined
+    const traceId = str(payload.traceId, 160)
     this.purgeEstimates()
     const hit = this.estimates.get(estimateId)
+    const persistedDigest = this.persistedEstimateDigests.get(estimateId)
     const prior = this.engine.findByIdempotencyKey(ws.id, key)
     if (prior) {
-      if (hit && (hit.est.capabilityId !== prior.capabilityId || hit.est.promptDigest !== prior.promptDigest)) {
+      const priorDigest = prior.payloadDigest ?? payloadDigest(prior.capabilityId, prior.promptDigest, prior.slots.length, prior.anchor)
+      const requestDigest = hit && hit.workspaceId === ws.id
+        ? payloadDigest(hit.est.capabilityId, hit.est.promptDigest, hit.est.slots, hit.est.anchor)
+        : persistedDigest?.workspaceId === ws.id ? persistedDigest.payloadDigest : undefined
+      if (!requestDigest) throw new JobError('ESTIMATE_EXPIRED', 'The estimate expired; request a new one')
+      if (requestDigest !== priorDigest) {
         throw new JobError('IDEMPOTENCY_CONFLICT', 'Same idempotencyKey was used for a different request')
       }
       return prior
@@ -178,7 +255,10 @@ export class CapabilityService {
       kind: adapter.descriptor.kind,
       title: hit.est.title,
       promptDigest: hit.est.promptDigest,
+      payloadDigest: payloadDigest(hit.est.capabilityId, hit.est.promptDigest, hit.est.slots, hit.est.anchor),
       requestedBy: requestedBy as JobRequester,
+      ...(requester && Object.keys(requester).length ? { requester } : {}),
+      ...(traceId ? { traceId } : {}),
       status: 'waiting_approval',
       estimate: hit.est.estimate,
       idempotencyKey: key,
@@ -232,7 +312,7 @@ export class CapabilityService {
     if (unknown && payload.acceptUnknownCost !== true) throw new JobError('UNKNOWN_COST_NOT_ACCEPTED', 'The owner cannot price this job; accept unknown cost explicitly')
     const cap = ceiling.unit === 'usd' ? settings.dailyCap?.usd : ceiling.unit === 'credits' ? settings.dailyCap?.credits : undefined
     if (cap !== undefined && ceiling.amount !== undefined) {
-      const line = computeBudget(this.engine.list(), settings).lines.find((l) => l.unit === ceiling.unit)
+      const line = computeBudget(this.engine.all(), settings).lines.find((l) => l.unit === ceiling.unit)
       if ((line?.committed ?? 0) + (line?.spent ?? 0) + ceiling.amount > cap) throw new JobError('BUDGET_EXCEEDED', 'Daily budget would be exceeded')
     }
     const acceptUnknownCost = payload.acceptUnknownCost === true
@@ -273,12 +353,24 @@ export class CapabilityService {
 
   // ------------------------------------------------------------ RPC
 
-  private async guard<T>(fn: () => Promise<T>): Promise<RpcEnvelope<T>> {
+  private async guard<T>(fn: () => Promise<T>, refs?: Record<string, unknown>): Promise<RpcEnvelope<T>> {
     try {
       return rpcOk(this.deps.generation(), await fn())
     } catch (err) {
-      if (err instanceof JobError) return rpcFail(this.deps.generation(), err.code, err.message, { retryable: err.code === 'OWNER_STATUS_UNKNOWN' })
-      if (err instanceof InputError) return rpcFail(this.deps.generation(), 'capability/invalid_input', err.message)
+      if (err instanceof JobError) {
+        this.deps.logger?.('capability.error', {
+          errorCode: err.code,
+          ...(typeof refs?.jobId === 'string' ? { jobRef: refs.jobId } : {}),
+        })
+        return rpcFail(this.deps.generation(), err.code, err.message, { retryable: err.code === 'OWNER_STATUS_UNKNOWN' })
+      }
+      if (err instanceof InputError) {
+        this.deps.logger?.('capability.error', {
+          errorCode: 'capability/invalid_input',
+          ...(typeof refs?.jobId === 'string' ? { jobRef: refs.jobId } : {}),
+        })
+        return rpcFail(this.deps.generation(), 'capability/invalid_input', err.message)
+      }
       throw err
     }
   }
@@ -307,10 +399,10 @@ export class CapabilityService {
         }
         case 'shot.media.link': return this.linkShot(payload, false)
         case 'shot.media.unlink': return this.linkShot(payload, true)
-        case 'budget.status': return computeBudget(this.engine.list(), this.settings())
+        case 'budget.status': return computeBudget(this.engine.all(), this.settings())
         default: throw new InputError(`Unhandled action ${action}`)
       }
-    })
+    }, payload)
   }
 }
 

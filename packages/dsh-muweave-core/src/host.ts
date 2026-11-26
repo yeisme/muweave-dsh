@@ -290,6 +290,7 @@ export interface CreatorHostServiceOptions {
   fetchImpl?: typeof globalThis.fetch
   mediaTtlMs?: number
   workspaceRoots?: readonly string[]
+  logger?: DshHostContextLike['logger']
 }
 
 export class CreatorHostService {
@@ -319,6 +320,7 @@ export class CreatorHostService {
   private readonly allowedRoots: string[]
   private readonly defaultWorkspaceId: string
   private readonly hostInstanceId = randomUUID()
+  private readonly logger?: DshHostContextLike['logger']
   private readonly ledgerDiagnostics: string[] = []
   private readonly invalidOperationWorkspaceIds = new Set<string>()
   private readonly capabilities: CapabilityService
@@ -329,6 +331,7 @@ export class CreatorHostService {
 
   constructor(options: CreatorHostServiceOptions = {}) {
     this.runner = options.runner ?? defaultCliRunner
+    this.logger = options.logger
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch
     this.templateRegistryUrl = options.templateRegistryUrl ?? process.env.MUWEAVE_TEMPLATE_REGISTRY_URL
     const dshHome = process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh')
@@ -350,6 +353,7 @@ export class CreatorHostService {
       syncWorkspace: async (ws) => {
         await syncBundle({ workspaceDir: ws.dir, runner: this.runner, upstreamPayloads: { dshArtifacts: this.dshToolArtifacts.get(ws.id) ?? [] } })
       },
+      logger: (event, fields) => this.logger?.('muweave').info({ event, hostInstanceId: this.hostInstanceId, ...fields }),
     })
   }
 
@@ -664,6 +668,13 @@ export class CreatorHostService {
     try {
       return stampHost(await this.dispatchRpcAction(action, payload), this.hostInstanceId)
     } catch (err) {
+      this.logger?.('muweave').warn({
+        event: 'host.error',
+        hostInstanceId: this.hostInstanceId,
+        errorCode: 'muweave/internal_error',
+        ...(typeof payload.jobId === 'string' ? { jobRef: payload.jobId } : {}),
+        ...(typeof payload.taskId === 'string' ? { taskRef: payload.taskId } : {}),
+      })
       if (err instanceof Error && err.message === 'WORKSPACE_NOT_FOUND') {
         return stampHost(rpcFail(this.generation, 'WORKSPACE_NOT_FOUND', 'Workspace is not registered', { retryable: false }), this.hostInstanceId)
       }
@@ -1496,6 +1507,26 @@ export class CreatorHostService {
             nextAction: operationNextAction(op.status),
           }
         })
+        for (const job of this.capabilities.engine.list()) {
+          const startedMs = Date.parse(job.createdAt) || nowMs
+          const endMs = ['completed', 'failed', 'cancelled'].includes(job.status) ? Date.parse(job.updatedAt) || nowMs : nowMs
+          spans.push({
+            spanId: `span_job_${job.jobId}`,
+            operationRef: job.jobId,
+            owner: 'dsh',
+            stageLabel: job.capabilityId,
+            status: job.status,
+            startedAt: job.createdAt,
+            updatedAt: job.updatedAt,
+            elapsedMs: Math.max(0, endMs - startedMs),
+            idempotencyKey: job.idempotencyKey,
+            ...(job.errorCode ? { blockerReason: job.errorCode } : {}),
+            nextAction: job.nextAction === 'review' ? 'human_review' : job.nextAction === 'reconcile' ? 'reconcile_original' : job.nextAction === 'wait' ? 'inspect' : job.nextAction,
+            jobRef: job.jobId,
+            ...(job.requester?.taskId ? { taskRef: job.requester.taskId } : {}),
+            ...(job.traceId ? { traceId: job.traceId } : {}),
+          })
+        }
         const snapshot: TimingProjectionSnapshotV1 = {
           capturedAt: new Date(nowMs).toISOString(),
           activeCount: spans.filter((s) => s.status === 'running' || s.status === 'queued').length,
@@ -1721,7 +1752,7 @@ export function mountSharedMuweaveHostRoutes(
   pluginLabel: string,
   options?: CreatorHostServiceOptions,
 ): CreatorHostService {
-  const state = getOrCreateSharedState(options)
+  const state = getOrCreateSharedState({ ...options, logger: options?.logger ?? ctx.logger })
   if (typeof process.env.MUWEAVE_WORKSPACE_DIR === 'string' && process.env.MUWEAVE_WORKSPACE_DIR.trim()) {
     const targetDir = path.resolve(process.env.MUWEAVE_WORKSPACE_DIR.trim())
     ctx.inject?.(['workspaceRegistry'], (sub) => {
