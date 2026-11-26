@@ -7,8 +7,18 @@
  */
 
 export const BOT_RPC_ACTIONS = ['bot.roster', 'bot.get', 'bot.pause'] as const
-export const TASK_RPC_ACTIONS = ['task.create', 'task.list', 'task.get', 'task.cancel', 'task.trace'] as const
+export const TASK_RPC_ACTIONS = ['task.create', 'task.delegate', 'task.list', 'task.get', 'task.cancel', 'task.trace'] as const
 export const EVENT_RPC_ACTIONS = ['event.list'] as const
+
+export interface DelegationRuleV1 {
+  fromBotId: string
+  toBotId: string
+  workspaceId: string
+  capabilityIds?: string[]
+  maxDepth: number
+  maxChildren: number
+  requiresUserApproval: boolean
+}
 
 export const BOT_TASK_RPC_ACTIONS = [
   ...BOT_RPC_ACTIONS,

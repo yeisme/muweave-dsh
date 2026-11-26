@@ -4,6 +4,8 @@ import path from 'node:path'
 import { rpcFail, rpcOk } from '../protocol'
 import type { RpcEnvelope } from '../protocol'
 import type { BotTaskLogger } from './protocol'
+import { BotRoster } from './roster'
+import { EventLog } from './events'
 
 export const TASKS_SCHEMA = 'muweave.tasks.v1'
 export type TaskStatus = 'proposed' | 'assigned' | 'running' | 'waiting_approval' | 'waiting_for_human' | 'succeeded' | 'failed' | 'cancelled' | 'orphaned'
@@ -30,6 +32,13 @@ export interface TaskRecordV1 {
 }
 export interface TaskLedgerDeps { pluginDataDir: string; logger?: BotTaskLogger }
 interface StoredTasks { schema: typeof TASKS_SCHEMA; tasks: TaskRecordV1[] }
+interface RosterBot {
+  botId: string
+  role: 'manager' | 'worker'
+  capabilityGrants: string[]
+  workspaceScopes: string[]
+  state: 'active' | 'paused' | 'retired'
+}
 const STATUSES = new Set<TaskStatus>(['proposed', 'assigned', 'running', 'waiting_approval', 'waiting_for_human', 'succeeded', 'failed', 'cancelled', 'orphaned'])
 const TERMINAL = new Set<TaskStatus>(['succeeded', 'failed', 'cancelled'])
 
@@ -81,10 +90,17 @@ function valid(raw: unknown): TaskRecordV1 | undefined {
 
 export class TaskLedger {
   private readonly file: string
+  private readonly roster: BotRoster
+  private readonly events: EventLog
   private readonly tasks = new Map<string, TaskRecordV1>()
   private readonly idempotency = new Map<string, TaskRecordV1>()
   private disposed = false
-  constructor(private readonly deps: TaskLedgerDeps) { this.file = path.join(deps.pluginDataDir, 'tasks.v1.json'); this.load() }
+  constructor(private readonly deps: TaskLedgerDeps) {
+    this.file = path.join(deps.pluginDataDir, 'tasks.v1.json')
+    this.roster = new BotRoster({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
+    this.events = new EventLog({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
+    this.load()
+  }
   private log(event: string, fields: Record<string, unknown> = {}): void { this.deps.logger?.(event, fields) }
   private key(workspaceId: string, key: string): string { return workspaceId + ':' + key }
   private load(): void {
@@ -123,7 +139,7 @@ export class TaskLedger {
     const parentTaskRef = optional(payload.parentTaskRef, 'parentTaskRef')
     const parent = parentTaskRef ? this.tasks.get(parentTaskRef) : undefined
     if (parentTaskRef && !parent) throw new LedgerError('TASK_NOT_FOUND', 'Parent task does not exist')
-    const assignedBy = ref(payload.assignedBy, 'assignedBy')
+    const assignedBy = ref(payload.assignedBy ?? payload.managerBotId ?? payload.callerBotId ?? payload.fromBotId ?? 'muweave-manager', 'assignedBy')
     const assignedTo = ref(payload.assignedTo, 'assignedTo')
     const depth = parent ? parent.depth + 1 : 0
     if (payload.depth !== undefined && (typeof payload.depth !== 'number' || !Number.isInteger(payload.depth) || payload.depth !== depth)) throw new LedgerError('BOT_DEPTH_EXCEEDED', 'Task delegation depth cannot exceed 2')
@@ -142,6 +158,55 @@ export class TaskLedger {
     this.log('bot_task.created', { taskRef: task.taskId, workspaceId: task.workspaceId, traceId: task.traceId, depth: task.depth })
     return { task }
   }
+  private async delegate(payload: Record<string, unknown>): Promise<{ task: TaskRecordV1 }> {
+    const workspaceId = required(payload.workspaceId, 'workspaceId')
+    const targetBotId = required(payload.assignedToBotId, 'assignedToBotId')
+    const assignedBy = ref(payload.assignedBy, 'assignedBy')
+    if (!assignedBy) throw new LedgerError('BOT_DELEGATION_FORBIDDEN', 'A manager bot is required to delegate a task')
+
+    const rosterResponse = await this.roster.handle('bot.roster', { workspaceId })
+    if (!rosterResponse.ok) throw new LedgerError('BOT_DELEGATION_FORBIDDEN', 'The bot roster is unavailable')
+    const bots = (rosterResponse.data as { bots?: RosterBot[] }).bots ?? []
+    const manager = bots.find((bot) => bot.botId === assignedBy.botId)
+    if (!manager || manager.role !== 'manager' || manager.state !== 'active') {
+      throw new LedgerError('BOT_DELEGATION_FORBIDDEN', 'Only an active manager bot can delegate tasks')
+    }
+    const worker = bots.find((bot) => bot.botId === targetBotId)
+    if (!worker || worker.state !== 'active') {
+      throw new LedgerError('BOT_TARGET_UNAVAILABLE', 'The target worker bot is unavailable')
+    }
+    if (worker.role !== 'worker' || worker.botId === manager.botId) {
+      throw new LedgerError('BOT_DELEGATION_FORBIDDEN', 'Tasks can only be delegated from a manager to a worker')
+    }
+    if (worker.capabilityGrants.length === 0 || worker.capabilityGrants.some((grant) => !manager.capabilityGrants.includes(grant)) ||
+        !(worker.workspaceScopes.includes('*') || worker.workspaceScopes.includes(workspaceId))) {
+      throw new LedgerError('BOT_CAPABILITY_NOT_GRANTED', 'The worker lacks the required capability or workspace grant')
+    }
+
+    // Preserve the first generated trace id across retries so an omitted traceId remains idempotent.
+    const idempotencyKey = required(payload.idempotencyKey, 'idempotencyKey')
+    const prior = this.idempotency.get(this.key(workspaceId, idempotencyKey))
+    const taskPayload = {
+      ...payload,
+      workspaceId,
+      assignedBy,
+      assignedTo: { botId: worker.botId },
+      idempotencyKey,
+      ...(prior ? { traceId: prior.traceId } : {}),
+    }
+    const result = this.create(taskPayload)
+    if (result.task === prior) return result
+    await this.events.append({
+      event: 'task.delegated',
+      taskId: result.task.taskId,
+      botId: worker.botId,
+      workspaceId: result.task.workspaceId,
+      traceId: result.task.traceId,
+      ref: result.task.taskId,
+      status: result.task.status,
+    })
+    return result
+  }
   private list(payload: Record<string, unknown>): { tasks: TaskRecordV1[] } {
     const workspaceId = optional(payload.workspaceId, 'workspaceId'); const rootTaskId = optional(payload.rootTaskId, 'rootTaskId'); const botId = optional(payload.botId, 'botId'); const status = payload.status === undefined ? undefined : required(payload.status, 'status')
     if (status && !STATUSES.has(status as TaskStatus)) throw new LedgerError('muweave/invalid_payload', 'Unknown task status')
@@ -158,6 +223,6 @@ export class TaskLedger {
     // TODO: connect EventLog once its append/list contract is available. Do not read events.v1.jsonl here.
     return { task: { taskId: task.taskId, workspaceId: task.workspaceId, ...(task.parentTaskRef ? { parentTaskRef: task.parentTaskRef } : {}), rootTaskId: task.rootTaskId, status: task.status, attention: task.attention, payloadDigest: task.payloadDigest, traceId: task.traceId, depth: task.depth, revision: task.revision, createdAt: task.createdAt, updatedAt: task.updatedAt }, jobs, events: [] }
   }
-  async handle(action: string, payload: Record<string, unknown>, generation = 0): Promise<RpcEnvelope<unknown>> { if (this.disposed) return rpcFail(generation, 'muweave/disposed', 'Task ledger is disposed'); try { switch (action) { case 'task.create': return rpcOk(generation, this.create(payload)); case 'task.list': return rpcOk(generation, this.list(payload)); case 'task.get': return rpcOk(generation, { task: this.get(payload.taskId) }); case 'task.cancel': return rpcOk(generation, this.cancel(payload)); case 'task.trace': return rpcOk(generation, this.trace(payload)); default: return rpcFail(generation, 'muweave/unknown_action', action + ' is not a task action') } } catch (error) { if (error instanceof LedgerError) return rpcFail(generation, error.code, error.message); this.log('bot_task.tasks_failed', { action, errorCode: 'TASK_LEDGER_FAILURE' }); return rpcFail(generation, 'muweave/internal_error', 'Task ledger operation failed') } }
+  async handle(action: string, payload: Record<string, unknown>, generation = 0): Promise<RpcEnvelope<unknown>> { if (this.disposed) return rpcFail(generation, 'muweave/disposed', 'Task ledger is disposed'); try { switch (action) { case 'task.create': return rpcOk(generation, this.create(payload)); case 'task.delegate': return rpcOk(generation, await this.delegate(payload)); case 'task.list': return rpcOk(generation, this.list(payload)); case 'task.get': return rpcOk(generation, { task: this.get(payload.taskId) }); case 'task.cancel': return rpcOk(generation, this.cancel(payload)); case 'task.trace': return rpcOk(generation, this.trace(payload)); default: return rpcFail(generation, 'muweave/unknown_action', action + ' is not a task action') } } catch (error) { if (error instanceof LedgerError) return rpcFail(generation, error.code, error.message); this.log('bot_task.tasks_failed', { action, errorCode: 'TASK_LEDGER_FAILURE' }); return rpcFail(generation, 'muweave/internal_error', 'Task ledger operation failed') } }
   dispose(): void { this.disposed = true }
 }
