@@ -2,9 +2,11 @@ import { createElement } from 'react'
 import { BUILTIN_CREATOR_TEMPLATES } from '../host-safe-catalog'
 import { getFloatingAgentSnapshot } from './floating-agent'
 import { statusLabel } from './i18n'
+import { getSharedMuweaveRpcClient } from './rpc-client'
 
 export type TriggerPickOutcome =
   | { text: string; continue?: boolean }
+  | { error: { code: string; message: string }; text?: string; continue?: boolean }
   | { insert: { source: string; ref: string; label: string; clipboardText: string } }
   | 'handled'
   | undefined
@@ -18,7 +20,7 @@ export interface DshInputTriggerSourceLike {
     session: { sessionId: string },
     req: { query: string; signal: AbortSignal },
   ): Promise<Array<Record<string, unknown>>> | Array<Record<string, unknown>>
-  onPick(args: { candidate: Record<string, unknown>; position?: string; span?: { start: number; end: number } }): TriggerPickOutcome
+  onPick(args: { candidate: Record<string, unknown>; position?: string; span?: { start: number; end: number } }): TriggerPickOutcome | Promise<TriggerPickOutcome>
   openReference?(session: { sessionId: string }, refObj: { ref: string }): boolean
   codec?: {
     clipboardText(ref: string): string
@@ -71,7 +73,7 @@ const RECENT_KEY = 'muweave.triggers.recent.v1'
 const RECENT_LIMIT = 6
 
 interface RecentEntry {
-  source: 'at' | 'slash'
+  source: 'at' | 'bot' | 'slash'
   key: string
   label: string
   at: number
@@ -86,7 +88,7 @@ function readRecent(): RecentEntry[] {
     return parsed.filter((e): e is RecentEntry => {
       if (typeof e !== 'object' || e === null) return false
       const row = e as Record<string, unknown>
-      return typeof row.key === 'string' && typeof row.label === 'string' && (row.source === 'at' || row.source === 'slash')
+      return typeof row.key === 'string' && typeof row.label === 'string' && (row.source === 'at' || row.source === 'bot' || row.source === 'slash')
     })
   } catch {
     return []
@@ -162,6 +164,7 @@ export function scoreTriggerMatch(query: string, label: string, extra: readonly 
  */
 export interface ParsedAtQuery {
   domain?: string
+  bot?: string
   kind?: string
   owner?: string
   scene?: string
@@ -169,7 +172,7 @@ export interface ParsedAtQuery {
   text: string
 }
 
-const AT_FILTER_KEYS = new Set(['domain', 'kind', 'owner', 'scene', 'episode'])
+const AT_FILTER_KEYS = new Set(['domain', 'bot', 'kind', 'owner', 'scene', 'episode'])
 /** Bare words that act as a domain filter: `@eikona` is shorter than `@domain:eikona`. */
 const AT_BARE_DOMAINS = new Set(['eikona', 'script', 'drama', 'harness', 'muweave'])
 
@@ -188,11 +191,12 @@ export function parseAtQuery(raw: string): ParsedAtQuery {
     const value = token.slice(idx + 1)
     // `scene:ep01:s01` keeps everything after the first colon.
     const key = AT_FILTER_KEYS.has(head) ? head : head === 'owner' || head === 'src' ? 'owner' : undefined
-    if (!key || !value) {
+    if (!key || (!value && key !== 'bot')) {
       words.push(token)
       continue
     }
     if (key === 'domain') out.domain = value.toLowerCase()
+    else if (key === 'bot') out.bot = value.toLowerCase()
     else if (key === 'kind') out.kind = value.toLowerCase()
     else if (key === 'owner') out.owner = value.toLowerCase()
     else if (key === 'scene') out.scene = value.toLowerCase()
@@ -229,13 +233,26 @@ export interface MuweaveElementAtHooks {
   onOpenElement?: (ref: string) => void
   /** A candidate was inserted into `sessionId`'s composer. */
   onPicked?: (sessionId: string | undefined, pick: { ref: string; label: string }) => void
+  rpc?: MuweaveBotAtHooks['rpc']
+  openSession?: (sessionRef: string) => void
+  onError?: MuweaveBotAtHooks['onError']
+  workspaceId?: string
 }
 
 export function createMuweaveElementAtSource(hooks?: MuweaveElementAtHooks | (() => void)): DshInputTriggerSourceLike {
   const sendBytes = new WeakMap<AbortSignal, number>()
   const MAX_SERIALIZE_BYTES = 32 * 1024
-  const { onOpenElement, onPicked }: MuweaveElementAtHooks =
+  const elementHooks: MuweaveElementAtHooks =
     typeof hooks === 'function' ? { onOpenElement: () => hooks() } : (hooks ?? {})
+  const { onOpenElement, onPicked } = elementHooks
+  const botSource = createMuweaveBotAtSource({
+    rpc: elementHooks.rpc ?? {
+      call: (action, payload, signal) => getSharedMuweaveRpcClient().call(action as never, payload, signal),
+    },
+    openSession: elementHooks.openSession,
+    onError: elementHooks.onError,
+    workspaceId: elementHooks.workspaceId,
+  })
   // onPick carries no session; the composer that asked for candidates is the one picking.
   let lastSessionId: string | undefined
 
@@ -248,6 +265,7 @@ export function createMuweaveElementAtSource(hooks?: MuweaveElementAtHooks | (()
       lastSessionId = session?.sessionId
       if (signal.aborted) return []
       const parsed = parseAtQuery(query)
+      if (parsed.bot !== undefined) return botSource.candidates(session, { query, signal })
       const recent = readRecent().filter((e) => e.source === 'at')
       const items = getFloatingAgentSnapshot().knownElements
       const lang = typeof navigator !== 'undefined' && navigator.language?.startsWith('en') ? 'en' : 'zh'
@@ -288,6 +306,9 @@ export function createMuweaveElementAtSource(hooks?: MuweaveElementAtHooks | (()
       }))
     },
     onPick({ candidate }) {
+      if (typeof candidate.value === 'object' && candidate.value !== null && 'botId' in candidate.value) {
+        return botSource.onPick({ candidate })
+      }
       const refStr = String(candidate.value ?? candidate.name ?? '')
       const label = String(candidate.label ?? candidate.name ?? 'element')
       const elementId = refStr.split('|')[0] ?? refStr
@@ -325,6 +346,114 @@ export function createMuweaveElementAtSource(hooks?: MuweaveElementAtHooks | (()
         }
         return line
       },
+    },
+  }
+}
+
+export interface MuweaveBotAtHooks {
+  /** The host RPC client. It must implement bot.roster and bot.session.get. */
+  rpc: {
+    call<T = unknown>(action: string, payload?: Record<string, unknown>, signal?: AbortSignal): Promise<{
+      ok: boolean
+      data?: T
+      error?: { code?: string; message?: string }
+    }>
+  }
+  /** Opens an existing native DSH session. This callback is never called without a sessionRef. */
+  openSession?: (sessionRef: string) => void
+  /** Receives explicit selection failures for hosts that render their own status surface. */
+  onError?: (error: { code: string; message: string }) => void
+  workspaceId?: string
+}
+
+interface BotRosterRow {
+  botId: string
+  role?: string
+  state?: string
+  sessionRef?: string
+}
+
+function botRows(data: unknown): BotRosterRow[] {
+  if (typeof data !== 'object' || data === null || !Array.isArray((data as { bots?: unknown }).bots)) return []
+  return (data as { bots: unknown[] }).bots.filter((row): row is BotRosterRow => {
+    if (typeof row !== 'object' || row === null) return false
+    const value = row as Record<string, unknown>
+    return typeof value.botId === 'string' && (value.role === undefined || typeof value.role === 'string') &&
+      (value.state === undefined || typeof value.state === 'string') &&
+      (value.sessionRef === undefined || typeof value.sessionRef === 'string')
+  })
+}
+
+function sessionRefFrom(data: unknown): string | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const value = data as Record<string, unknown>
+  const bot = typeof value.bot === 'object' && value.bot !== null ? value.bot as Record<string, unknown> : undefined
+  const session = typeof value.session === 'object' && value.session !== null ? value.session as Record<string, unknown> : undefined
+  for (const candidate of [value.sessionRef, value.sessionId, bot?.sessionRef, session?.sessionRef, session?.sessionId]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate
+  }
+  return undefined
+}
+
+/** `@bot:` source. Bot rows come from the host roster, and selecting one opens only its existing session. */
+export function createMuweaveBotAtSource(hooks: MuweaveBotAtHooks): DshInputTriggerSourceLike {
+  const recentSource = 'bot' as const
+  return {
+    trigger: '@',
+    name: 'muweave-bots',
+    order: 23,
+    showGroupTitle: true,
+    async candidates(_session, { query, signal }) {
+      if (signal.aborted) return []
+      const parsed = parseAtQuery(query)
+      if (parsed.bot === undefined) return []
+      const roster = await hooks.rpc.call<{ bots?: unknown[] }>('bot.roster', { ...(hooks.workspaceId ? { workspaceId: hooks.workspaceId } : {}) }, signal)
+      if (!roster.ok || signal.aborted) return []
+      const recent = readRecent().filter((entry) => entry.source === recentSource)
+      const wanted = parsed.bot
+      return botRows(roster.data)
+        .filter((bot) => bot.state !== 'retired')
+        .map((bot) => {
+          const id = bot.botId.toLowerCase()
+          const role = (bot.role ?? '').toLowerCase()
+          if (wanted && id !== wanted && role !== wanted) return undefined
+          const recentRank = recent.findIndex((entry) => entry.key === bot.botId)
+          return {
+            name: bot.botId,
+            label: bot.botId,
+            description: `${bot.role ?? 'bot'}${bot.state ? ` · ${bot.state}` : ''}`,
+            section: recentRank >= 0 ? '最近使用' : 'Bot',
+            value: { botId: bot.botId, role: bot.role, sessionRef: bot.sessionRef },
+            recentRank,
+          }
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== undefined)
+        .sort((a, b) => {
+          if (a.recentRank !== b.recentRank) {
+            if (a.recentRank === -1) return 1
+            if (b.recentRank === -1) return -1
+            return a.recentRank - b.recentRank
+          }
+          return a.name.localeCompare(b.name)
+        })
+        .map(({ recentRank: _recentRank, ...row }) => row)
+    },
+    async onPick({ candidate }) {
+      const value = (candidate.value ?? {}) as { botId?: unknown }
+      const botId = typeof value.botId === 'string' ? value.botId : String(candidate.name ?? '')
+      const label = String(candidate.label ?? botId)
+      pushRecent(recentSource, botId, label)
+      const unavailable = (message: string): TriggerPickOutcome => {
+        const error = { code: 'BOT_SESSION_UNAVAILABLE', message }
+        hooks.onError?.(error)
+        return { error, text: `${error.code}: ${message}`, continue: true }
+      }
+      const response = await hooks.rpc.call('bot.session.get', { botId, ...(hooks.workspaceId ? { workspaceId: hooks.workspaceId } : {}) })
+      if (!response.ok) return unavailable(response.error?.message ?? `Bot ${botId} has no available session`)
+      const sessionRef = sessionRefFrom(response.data)
+      if (!sessionRef) return unavailable(`Bot ${botId} has no available session. Create or restore its session before opening it.`)
+      hooks.openSession?.(sessionRef)
+      return { text: `已打开 ${botId}` }
     },
   }
 }
