@@ -25,9 +25,9 @@ export class BotTaskService {
   readonly events: EventLog
 
   constructor(private readonly deps: BotTaskServiceDeps) {
-    this.roster = new BotRoster({ logger: deps.logger })
-    this.tasks = new TaskLedger({ logger: deps.logger })
-    this.events = new EventLog({ logger: deps.logger })
+    this.roster = new BotRoster({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
+    this.tasks = new TaskLedger({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
+    this.events = new EventLog({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
   }
 
   isBotTaskAction(action: string): boolean {
