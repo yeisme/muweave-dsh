@@ -36,17 +36,18 @@ const behind = Number(sh('git rev-list --count HEAD..origin/develop') || 0)
 // 每项：marker 命中即视为「有实现」，靠单测数确认是否收口
 const items = [
   {
-    id: 'P2-A', name: 'bot.delegate + DelegationRuleV1 五道闸', core: true,
+    id: 'P2-A', name: 'task.delegate + DelegationRuleV1 五道闸', core: true,
     checks: [
-      ['bot-task/protocol.ts 有 bot.delegate', () => has('packages/dsh-muweave-core/src/bot-task/protocol.ts', 'bot.delegate')],
-      ['DelegationRuleV1 类型', () => countIn('packages/dsh-muweave-core/src', 'DelegationRuleV1') !== '0'],
+      ['protocol.ts 有 task.delegate', () => has('packages/dsh-muweave-core/src/bot-task/protocol.ts', "'task.delegate'")],
+      ['DelegationRuleV1 类型', () => has('packages/dsh-muweave-core/src/bot-task/protocol.ts', 'DelegationRuleV1')],
+      ['五道闸错误码齐全', () => ['BOT_DELEGATION_FORBIDDEN', 'BOT_TARGET_UNAVAILABLE', 'BOT_CAPABILITY_NOT_GRANTED', 'BOT_DEPTH_EXCEEDED', 'BOT_FANOUT_EXCEEDED'].every((c) => has('packages/dsh-muweave-core/src/bot-task/tasks.ts', c))],
       ['delegate 测试', () => existsSync(resolve(root, 'tests/bot-delegate.test.ts'))],
     ],
   },
   {
     id: 'P2-B', name: 'manager session 绑定与恢复', core: false,
     checks: [
-      ['sessionBinding 持久化', () => countIn('packages/dsh-muweave-core/src', 'sessionBinding') !== '0' || countIn('packages/dsh-muweave-core/src/bot-task', 'sessionRef') !== '0'],
+      ['sessions.ts 存在（session↔bot 映射）', () => existsSync(resolve(root, 'packages/dsh-muweave-core/src/bot-task/sessions.ts'))],
       ['session 恢复测试', () => existsSync(resolve(root, 'tests/bot-sessions.test.ts'))],
     ],
   },
