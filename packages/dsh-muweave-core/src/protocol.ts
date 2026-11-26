@@ -14,6 +14,7 @@ import type {
 } from '@yeisme/muweave-bundle/consumer'
 import { findPlaintextCredential } from '@yeisme/muweave-bundle/consumer'
 import { CAPABILITY_RPC_ACTIONS } from './capability-protocol'
+import { BOT_TASK_RPC_ACTIONS } from './bot-task/protocol'
 
 export const MUWEAVE_RPC_PATH = '/api/muweave-dsh/rpc' as const
 export const MUWEAVE_MEDIA_PATH = '/api/muweave-dsh/media' as const
@@ -156,10 +157,18 @@ export const RPC_ACTIONS = [
   'project.clone',
 ] as const
 
-export type MuweaveRpcAction = (typeof RPC_ACTIONS)[number] | (typeof CAPABILITY_RPC_ACTIONS)[number]
+export type MuweaveRpcAction =
+  | (typeof RPC_ACTIONS)[number]
+  | (typeof CAPABILITY_RPC_ACTIONS)[number]
+  | (typeof BOT_TASK_RPC_ACTIONS)[number]
 
 export function isMuweaveRpcAction(v: unknown): v is MuweaveRpcAction {
-  return typeof v === 'string' && ((RPC_ACTIONS as readonly string[]).includes(v) || (CAPABILITY_RPC_ACTIONS as readonly string[]).includes(v))
+  if (typeof v !== 'string') return false
+  return (
+    (RPC_ACTIONS as readonly string[]).includes(v) ||
+    (CAPABILITY_RPC_ACTIONS as readonly string[]).includes(v) ||
+    (BOT_TASK_RPC_ACTIONS as readonly string[]).includes(v)
+  )
 }
 
 export interface RpcErrorShape {
