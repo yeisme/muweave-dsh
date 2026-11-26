@@ -3,6 +3,7 @@ import { rpcFail } from '../protocol'
 import { BotRoster } from './roster'
 import { TaskLedger } from './tasks'
 import { EventLog } from './events'
+import { BotSessions } from './sessions'
 import type { BotTaskLogger } from './protocol'
 import type { RpcEnvelope } from '../protocol'
 
@@ -23,11 +24,13 @@ export class BotTaskService {
   readonly roster: BotRoster
   readonly tasks: TaskLedger
   readonly events: EventLog
+  readonly sessions: BotSessions
 
   constructor(private readonly deps: BotTaskServiceDeps) {
     this.roster = new BotRoster({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
     this.tasks = new TaskLedger({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
     this.events = new EventLog({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
+    this.sessions = new BotSessions({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
   }
 
   isBotTaskAction(action: string): boolean {
@@ -35,6 +38,7 @@ export class BotTaskService {
   }
 
   async handle(action: string, payload: Record<string, unknown>, generation = 0): Promise<RpcEnvelope<unknown>> {
+    if (action.startsWith('bot.session.')) return this.sessions.handle(action, payload, generation)
     if (action.startsWith('bot.')) return this.roster.handle(action, payload, generation)
     if (action.startsWith('task.')) return this.tasks.handle(action, payload, generation)
     if (action.startsWith('event.')) return this.events.handle(action, payload, generation)
@@ -45,5 +49,6 @@ export class BotTaskService {
     this.roster.dispose()
     this.tasks.dispose()
     this.events.dispose()
+    this.sessions.dispose()
   }
 }

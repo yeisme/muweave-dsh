@@ -6,7 +6,7 @@
  * separate files without every change touching the host's dispatch switch.
  */
 
-export const BOT_RPC_ACTIONS = ['bot.roster', 'bot.get', 'bot.pause'] as const
+export const BOT_RPC_ACTIONS = ['bot.roster', 'bot.get', 'bot.pause', 'bot.session.get', 'bot.session.bind'] as const
 export const TASK_RPC_ACTIONS = ['task.create', 'task.delegate', 'task.list', 'task.get', 'task.cancel', 'task.trace'] as const
 export const EVENT_RPC_ACTIONS = ['event.list'] as const
 
