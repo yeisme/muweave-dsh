@@ -45,6 +45,7 @@ import {
   type WorkspaceSummaryView,
 } from './protocol'
 import { CapabilityService } from './capabilities/service'
+import { BotTaskService } from './bot-task/service'
 import { ScheduleInputError, ScheduleStore } from './schedule-store'
 import { ProjectInputError, ProjectStore } from './project-store'
 import type { JobRecordV1 } from './capability-protocol'
@@ -324,6 +325,7 @@ export class CreatorHostService {
   private readonly ledgerDiagnostics: string[] = []
   private readonly invalidOperationWorkspaceIds = new Set<string>()
   private readonly capabilities: CapabilityService
+  private readonly botTask: BotTaskService
   /** Publishing board; its own file, so a bad schedule never touches the job ledger. */
   private readonly schedule: ScheduleStore
   /** Project registry: identity + user intent only; element truth stays in .muweave/. */
@@ -355,6 +357,11 @@ export class CreatorHostService {
       },
       logger: (event, fields) => this.logger?.('muweave').info({ event, hostInstanceId: this.hostInstanceId, ...fields }),
     })
+
+    this.botTask = new BotTaskService({
+      pluginDataDir: this.pluginDataDir,
+      logger: (event, fields) => this.logger?.('muweave').info({ event, hostInstanceId: this.hostInstanceId, ...fields }),
+    })
   }
 
   /** Agent tools call this directly; it creates a waiting_approval job and has no approve counterpart. */
@@ -365,6 +372,7 @@ export class CreatorHostService {
   /** Stops the job poller; safe to call more than once. */
   dispose(): void {
     this.capabilities.dispose()
+    this.botTask.dispose()
   }
 
   private restorePersistedLedgerSync(): void {
@@ -877,6 +885,7 @@ export class CreatorHostService {
 
   private async dispatchRpcAction(action: string, payload: Record<string, unknown>): Promise<RpcEnvelope<unknown>> {
     if (this.capabilities.isCapabilityAction(action)) return this.capabilities.handle(action, payload)
+    if (this.botTask.isBotTaskAction(action)) return this.botTask.handle(action, payload, this.generation)
     switch (action) {
       case 'workspace.list': {
         const items = Array.from(this.workspaces.keys()).map((id) => this.describeWorkspace(id)!)
