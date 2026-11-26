@@ -8,6 +8,9 @@ import { chromium } from 'playwright'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const artifactsDir = process.argv[2] ?? path.join(rootDir, 'temp', 'artifacts')
+// The launcher passes <evidenceDir>/artifacts where <evidenceDir> carries the run id
+// (timestamp + uuid). Derive it so per-run keys stay unique without changing the CLI.
+const runId = path.basename(path.dirname(artifactsDir)) || `local-${Date.now()}`
 await mkdir(artifactsDir, { recursive: true })
 
 /** The host dsh actually driving this run, recorded in the evidence bundle. */
@@ -142,6 +145,44 @@ try {
     ].join('\n'),
   )
 
+  // Seed the isolated host's bot roster so the real RPC path can exercise the
+  // manager-to-worker delegation branch. The calls below still go through the
+  // browser's authenticated /api/muweave-dsh/rpc route.
+  const botDataDir = path.join(tmpDshHome, 'plugin-data', 'muweave-dsh')
+  await mkdir(botDataDir, { recursive: true })
+  await writeFile(
+    path.join(botDataDir, 'bots.v1.json'),
+    JSON.stringify({
+      schema: 'muweave.bots.v1',
+      bots: [
+        {
+          botId: 'muweave-manager',
+          role: 'manager',
+          presetRef: 'muweave-creator',
+          capabilityGrants: ['task.delegate'],
+          ownerScopes: [],
+          workspaceScopes: ['*'],
+          budgetEnvelope: { unit: 'none' },
+          state: 'active',
+          revision: 1,
+        },
+        {
+          botId: 'muweave-worker',
+          role: 'worker',
+          presetRef: 'muweave-creator-worker',
+          capabilityGrants: ['task.delegate'],
+          ownerScopes: [],
+          workspaceScopes: ['*'],
+          budgetEnvelope: { unit: 'none' },
+          state: 'active',
+          revision: 1,
+        },
+      ],
+      pauses: {},
+    }) + '\n',
+    { mode: 0o600 },
+  )
+
   // 4. Boot DSH web host on ephemeral port 0
   dshProc = spawn(
     'dsh',
@@ -202,6 +243,119 @@ try {
   })
 
   await page.goto(launchUrl, { waitUntil: 'networkidle' })
+
+  // P3 real-host smoke for the P2 bot/task/event RPCs. Keep the evidence
+  // projection deliberately narrow so task goals, credentials, and host paths
+  // never enter the integration artifact.
+  const botTaskRpcEvidence = []
+  const recordBotTaskStep = (step, action, detail, extra = {}) => {
+    botTaskRpcEvidence.push({ step, action, detail, ...extra })
+    process.stdout.write(`PASS ${step}: ${detail}\n`)
+  }
+  const failBotTaskStep = (step, action, message, response) => {
+    const actual = response && typeof response === 'object'
+      ? { ok: response.ok, error: response.error ? { code: response.error.code, message: response.error.message } : undefined }
+      : response
+    botTaskRpcEvidence.push({ step, action, status: 'failed', message, actual })
+    throw new Error(`[${action}] ${message}; actual=${JSON.stringify(actual)}`)
+  }
+  const rpc = async (action, payload) => page.evaluate(async ({ action: rpcAction, payload: rpcPayload }) => {
+    try {
+      const response = await fetch('/api/muweave-dsh/rpc', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: rpcAction, payload: rpcPayload }),
+      })
+      const body = await response.json().catch(() => undefined)
+      return { status: response.status, body }
+    } catch (error) {
+      return { status: 0, body: { ok: false, error: { code: 'RPC_TRANSPORT_FAILED', message: String(error) } } }
+    }
+  }, { action, payload })
+
+  const workspaceId = `integration-${runId}`
+  const managerId = 'muweave-manager'
+  const workerId = 'muweave-worker'
+  const sessionRef = `test-session-${runId}`
+  const delegateKey = `delegate-${runId}`
+  const rosterResponse = (await rpc('bot.roster', { workspaceId })).body
+  if (!rosterResponse?.ok) failBotTaskStep('bot.roster', 'bot.roster', 'expected an RPC success envelope', rosterResponse)
+  const bots = rosterResponse.data?.bots
+  const manager = Array.isArray(bots) ? bots.find((bot) => bot?.role === 'manager' && typeof bot?.botId === 'string') : undefined
+  if (!manager || !manager.botId) failBotTaskStep('bot.roster', 'bot.roster', 'expected at least one manager with a non-empty botId', rosterResponse)
+  recordBotTaskStep('bot.roster', 'bot.roster', `manager=${manager.botId}`, { managerId: manager.botId, botCount: bots.length })
+
+  const bindResponse = (await rpc('bot.session.bind', { botId: manager.botId, workspaceId, sessionRef })).body
+  if (!bindResponse?.ok || bindResponse.data?.session?.sessionRef !== sessionRef) {
+    failBotTaskStep('bot.session.bind', 'bot.session.bind', `expected sessionRef ${sessionRef}`, bindResponse)
+  }
+  recordBotTaskStep('bot.session.bind', 'bot.session.bind', `bound ${manager.botId} to ${sessionRef}`)
+
+  const sessionResponse = (await rpc('bot.session.get', { botId: manager.botId, workspaceId })).body
+  if (!sessionResponse?.ok || sessionResponse.data?.session?.sessionRef !== sessionRef) {
+    failBotTaskStep('bot.session.get', 'bot.session.get', `expected readback sessionRef ${sessionRef}`, sessionResponse)
+  }
+  recordBotTaskStep('bot.session.get', 'bot.session.get', `read back ${sessionRef}`)
+
+  const rootResponse = (await rpc('task.create', { workspaceId, goal: 'integration root task', idempotencyKey: `root-${runId}` })).body
+  if (!rootResponse?.ok || typeof rootResponse.data?.task?.taskId !== 'string') {
+    failBotTaskStep('task.delegate', 'task.create', 'expected a parent task for delegation trace', rootResponse)
+  }
+  const parentTaskId = rootResponse.data.task.taskId
+  const delegatePayload = {
+    workspaceId,
+    goal: 'integration delegated task',
+    assignedBy: { botId: manager.botId },
+    assignedToBotId: workerId,
+    parentTaskRef: parentTaskId,
+    idempotencyKey: delegateKey,
+  }
+  const delegateResponse = (await rpc('task.delegate', delegatePayload)).body
+  if (!delegateResponse?.ok || typeof delegateResponse.data?.task?.taskId !== 'string') {
+    failBotTaskStep('task.delegate', 'task.delegate', 'expected manager-to-worker delegation to create a task', delegateResponse)
+  }
+  const taskId = delegateResponse.data.task.taskId
+  recordBotTaskStep('task.delegate', 'task.delegate', `created ${taskId} for ${workerId}`, { taskId, assignedTo: workerId })
+
+  const taskResponse = (await rpc('task.get', { taskId })).body
+  const task = taskResponse?.data?.task
+  if (!taskResponse?.ok || task?.parentTaskRef !== parentTaskId || task?.rootTaskId !== parentTaskId || task?.assignedTo?.botId !== workerId) {
+    failBotTaskStep('task.get', 'task.get', `expected parentTaskRef=${parentTaskId}, rootTaskId=${parentTaskId}, assignedTo=${workerId}`, taskResponse)
+  }
+  recordBotTaskStep('task.get', 'task.get', `parent=${parentTaskId} root=${parentTaskId} assignedTo=${workerId}`)
+
+  const traceResponse = (await rpc('task.trace', { taskId })).body
+  const traceText = JSON.stringify(traceResponse?.data ?? '')
+  if (!traceResponse?.ok || !traceResponse.data?.task || traceResponse.data.task.taskId !== taskId || /(?:\/home|\/Users|\/root|\/var|\/tmp|\/etc|\/opt|\/private|\/mnt|\/srv|\/proc)\//.test(traceText)) {
+    failBotTaskStep('task.trace', 'task.trace', 'expected a trace chain with no absolute host path', traceResponse)
+  }
+  recordBotTaskStep('task.trace', 'task.trace', `trace returned for ${taskId} without absolute paths`)
+
+  const eventResponse = (await rpc('event.list', { taskId, limit: 50 })).body
+  const events = eventResponse?.data?.events
+  if (!eventResponse?.ok || !Array.isArray(events) || !events.some((event) => event?.event === 'task.delegated' && event?.taskId === taskId)) {
+    failBotTaskStep('event.list', 'event.list', `expected task.delegated for ${taskId}`, eventResponse)
+  }
+  recordBotTaskStep('event.list', 'event.list', `found task.delegated for ${taskId}`)
+
+  const cancelResponse = (await rpc('task.cancel', { taskId })).body
+  const cancelledResponse = (await rpc('task.get', { taskId })).body
+  if (!cancelResponse?.ok || cancelResponse.data?.task?.status !== 'cancelled' || !cancelledResponse?.ok || cancelledResponse.data?.task?.status !== 'cancelled') {
+    failBotTaskStep('task.cancel', 'task.cancel/task.get', `expected cancelled status for ${taskId}`, { cancelResponse, cancelledResponse })
+  }
+  recordBotTaskStep('task.cancel', 'task.cancel/task.get', `${taskId} is cancelled`)
+
+  const replayResponse = (await rpc('task.delegate', delegatePayload)).body
+  if (!replayResponse?.ok || replayResponse.data?.task?.taskId !== taskId) {
+    failBotTaskStep('idempotency', 'task.delegate', `same idempotencyKey should return ${taskId}`, replayResponse)
+  }
+  const conflictResponse = (await rpc('task.delegate', { ...delegatePayload, goal: 'different integration delegated task' })).body
+  if (conflictResponse?.ok || conflictResponse?.error?.code !== 'TASK_IDEMPOTENCY_CONFLICT') {
+    failBotTaskStep('idempotency', 'task.delegate', 'different payload should return TASK_IDEMPOTENCY_CONFLICT', conflictResponse)
+  }
+  recordBotTaskStep('idempotency', 'task.delegate', `replayed ${taskId}; conflict code TASK_IDEMPOTENCY_CONFLICT`, { taskId, conflictCode: conflictResponse.error.code })
+  await writeFile(path.join(artifactsDir, 'bot-task-rpc.json'), JSON.stringify({ schema: 'muweave.bot-task-rpc.v1', workspaceId, managerId: manager.botId, workerId, steps: botTaskRpcEvidence }, null, 2) + '\n')
 
   // Verify startup did NOT hijack native home (`[data-muweave-workspace-root]` is absent until user selects a panel)
   const initialWorkspaceCount = await page.locator('[data-muweave-workspace-root="true"]').count()
@@ -658,6 +812,8 @@ try {
   if (pageErrors.length > 0) {
     throw new Error(`Uncaught browser page errors:\n${pageErrors.join('\n')}`)
   }
+
+
 
   process.stdout.write('ALL OFFLINE REAL-HOST DSH PLAYWRIGHT E2E CHECKS PASSED.\n')
 } finally {
