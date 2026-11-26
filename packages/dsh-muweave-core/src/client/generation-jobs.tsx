@@ -310,7 +310,7 @@ export function JobRow({
         <StatusTag status={job.status} lang={lang} label={tr(t, `genStatus_${job.status}`) || job.status} />
       </div>
       <div className="mw-row" data-gap="xs">
-        <span className="mw-chip">{job.owner}</span>
+        <span className="mw-chip" title={job.owner}>{job.requester?.botId ?? job.owner}</span>
         <span className="mw-dsh-muted">{summary}</span>
         {anchor ? <span className="mw-chip" data-mono="true" title={tr(t, 'genAnchor')}>{anchor}</span> : null}
         {job.errorCode ? <span className="mw-chip" data-mono="true">{job.errorCode}</span> : null}
