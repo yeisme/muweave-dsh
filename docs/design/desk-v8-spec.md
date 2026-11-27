@@ -1,6 +1,6 @@
 # MuWeave 工作台 v8 Spec：交付状态与后续待做
 
-> 状态：v8 P0、P1、P2，M1-M4，F1、F2、F3 与 schedule v2 已交付。项目管理架构 P2 只剩注册表迁移报告。
+> 状态：v8 P0、P1、P2，M1-M4，F1、F2、F3，schedule v2 与注册表迁移报告均已交付。项目管理架构 P2 规划项已全部收口。
 > 事实依据：每项已交付状态都对应下表中的提交号或文件路径。
 > 调研限制：`web_search` 因 API 余额不足（HTTP 402）不可用。以下 NN/g 引用均来自 `web_fetch` 实际取到的正文。
 
@@ -100,17 +100,17 @@ v8 的检验：
 
 project.diagnose 已在 54d1374 交付。它把注册表损坏、bundle 缺失、owner unavailable、revision conflict 和 unknown operation 映射为稳定的 state、code、nextAction 与安全展示字段。实现证据见 packages/dsh-muweave-core/src/host.ts、packages/dsh-muweave-workbench/src/diagnosis-panel.tsx、tests/diagnosis-panel.test.tsx 与 tests/project-diagnose.test.ts。契约和验收以 f3-spec.md 为准，交付结论见 f3-delivery.md。
 
-### 4.2 项目管理架构 P2 剩余项
+### 4.2 项目管理架构 P2 交付项（已收口）
 
-project-management-arch.md 的 P2 目前只剩一项未交付工作。
+project-management-arch.md 的 P2 规划项已全部交付：
 
-- 注册表迁移报告仍未交付，当前没有对应实现入口或提交。
-- schedule v2 已由 fadbe67 交付，采用 schedule.v1.json 的可选 projectId 兼容扩展，不增加 board-level v2 marker。详情见 schedule-v2-delivery.md。
+- **注册表迁移报告**：✅ 已交付（v3 收口）。新增只读 RPC `project.migration.report`（`packages/dsh-muweave-core/src/host.ts`）与 `ProjectStore.migrationReport()`（`packages/dsh-muweave-core/src/project-store.ts`），聚合 schema 版本、脱敏损坏备份清单、未认领旧 bundle 候选数、legacy 排期条数及 v1→v2 迁移就绪检查项；Workbench 诊断面板在 `packages/dsh-muweave-workbench/src/diagnosis-panel.tsx` 渲染只读迁移报告区块，单测见 `tests/project-migration-report.test.ts`。
+- **schedule v2**：✅ 已由 `fadbe67` 交付，采用 `schedule.v1.json` 的可选 `projectId` 兼容扩展，不增加 board-level v2 marker。详情见 `schedule-v2-delivery.md`。
 
-注册表迁移报告与 F3、schedule v2 是独立交付物，不能互相替代。
+注册表迁移报告与 F3、schedule v2 是独立交付物，各具独立 RPC 与测试证据。
 
 ## 5. 事实与判断
 
 **事实** 是提交号、文件路径和 arch 文档中已写明的 RPC/状态。**判断** 是本 spec 对主入口和后续顺序的归纳。判断部分不改变已发布 RPC、bundle schema 或 owner 边界。
 
-当前 v8 已交付项的提交级验证记录保留在 git show --stat <commit>、对应测试文件和交付报告中。F3 的提交是 54d1374，schedule v2 的提交是 fadbe67。注册表迁移报告仍没有对应实现提交，因此保持未交付。历史上曾出现的 F3 工作树草稿已经由 54d1374 纳入提交，不能再作为当前未提交状态描述。
+当前 v8 已交付项的提交级验证记录保留在 `git show --stat <commit>`、对应测试文件和交付报告中。F3 的提交是 `54d1374`，schedule v2 的提交是 `fadbe67`，注册表迁移报告已通过 `project.migration.report`、`ProjectStore.migrationReport()`、`packages/dsh-muweave-workbench/src/diagnosis-panel.tsx` 与 `tests/project-migration-report.test.ts` 落地收口。历史上曾出现的 F3 工作树草稿已经由 `54d1374` 纳入提交，不能再作为当前未提交状态描述。

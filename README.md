@@ -84,6 +84,66 @@ NODE_OPTIONS=--localstorage-file=temp/vitest-$(date +%H%M%S).json \
   pnpm exec vitest run --no-file-parallelism
 ```
 
+## CLI 快速体验（含 `muweave demo`）
+
+构建后可直接通过 `pnpm muweave`（或全局安装的 `muweave` 命令）操作 `.muweave/` 工作区，支持默认人类可读、`--json` 与 `--agent`（`spec_version=1.0`）三种脱敏输出：
+
+```bash
+# 1. 在空目录一键生成「雨夜怀表 · 第 1 集」9:16 演示工作区（已有 .muweave/ 时需显式 --force）
+pnpm muweave demo seed --workspace ./demo-ep01
+
+# 2. 查看工作区状态与缺媒镜头
+pnpm muweave status --workspace ./demo-ep01
+pnpm muweave shots list --workspace ./demo-ep01 --missing keyframe
+
+# 3. 审片与导出标准 NLE 粗剪交接包（支持 cut_manifest_v1 / cmx3600_edl / shotlist_csv）
+pnpm muweave review set --workspace ./demo-ep01 --shot shot_01 --status approved --note "节奏稳"
+pnpm muweave export cmx3600_edl --workspace ./demo-ep01 --out ./roughcut.edl
+
+# 4. 排期与诊断
+pnpm muweave schedule list --workspace ./demo-ep01
+pnpm muweave diagnose --workspace ./demo-ep01 --json
+```
+
+## MCP Server（本地 stdio / 远程 HTTP）接入指南
+
+`@yeisme/dsh-muweave-core` 内置零新增依赖的 MCP JSON-RPC 2.0 服务（12 个脱敏工具、5 个 `muweave://*` 资源、3 个创作提示词），**绝不暴露 `job.approve` 等自动付费审批动作**。
+
+### 1. 本地 stdio（Claude Desktop / Cursor 等）
+
+```json
+{
+  "mcpServers": {
+    "muweave": {
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/packages/dsh-muweave-core/lib/cli.js",
+        "mcp",
+        "--transport",
+        "stdio",
+        "--workspace",
+        "${workspaceFolder}"
+      ]
+    }
+  }
+}
+```
+
+### 2. 远程 Streamable HTTP 服务
+
+默认监听回环地址 `127.0.0.1:3741`（提供 `GET /healthz` 与 `GET/POST/DELETE /mcp`）。监听非回环地址（如 `0.0.0.0`）时**必须**配置 `MUWEAVE_MCP_TOKEN` 或 `--auth-token`，否则启动立即以 `REMOTE_AUTH_TOKEN_REQUIRED` 失败退出：
+
+```bash
+# 本地回环启动
+pnpm muweave mcp --transport http --host 127.0.0.1 --port 3741 --workspace "${workspaceFolder}"
+
+# 远程监听（强制 Bearer 鉴权）
+MUWEAVE_MCP_TOKEN="<your-mcp-token>" \
+  pnpm muweave mcp --transport http --host 0.0.0.0 --port 3741 --workspace "${workspaceFolder}"
+```
+
+客户端请求 `/mcp` 时携带 `Authorization: Bearer <your-mcp-token>` 即可；如需代理至运行中的本地 DSH 宿主，可附加 `--host-url http://127.0.0.1:<dsh-port>`。
+
 ## 安全设计（为什么一半能力是灰的）
 
 付费能力要同时满足四条才允许执行：命令有**费用封顶**、有**幂等键**、有**真正的提交子命令**、产物**可核对**（id / sha256）。缺一条就只进能力目录、不进执行。

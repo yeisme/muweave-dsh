@@ -12,6 +12,9 @@
 | [f3-spec.md](./f3-spec.md) | 现行 | F3 项目诊断的只读契约、异常映射和交互验收 | 需要核对已交付诊断契约或后续评审时 |
 | [project-management-arch.md](./project-management-arch.md) | 现行 | 项目注册表、RPC 边界、P0-P2 架构验收 | 需要核对项目数据边界、错误码和长期兼容预留时 |
 | [tab-room-mapping.md](./tab-room-mapping.md) | 现行 | 7 个剧场 room 与 21 个 stage tab 的源码映射 | 需要核对 room、plugin owner、stage tab ID 或 9-tab 口径时 |
+| [drama-studio-v2.md](./drama-studio-v2.md) | 现行 | Drama Studio v2/v3 导演审片、6 轨媒体、Animatic、粗剪导出与多 Agent P3 规格 | 需要核对 `muweave-drama` v2/v3 RPC 契约、导出格式、UI 交互或 P3 级联取消时 |
+| [tri-surface-cli-mcp-v5.md](./tri-surface-cli-mcp-v5.md) | 现行 | v5 三端合一（Creator CLI、Demo 种子、本地 stdio / 远程 HTTP MCP 与 UX 升级）规格 | 需要核对 `muweave` CLI、MCP 工具/鉴权或 Kit 接入向导时 |
+| [orchestration-ecosystem-v6.md](./orchestration-ecosystem-v6.md) | 现行 | v6 多 Agent 编排控制面、能力预检、`demo.image.preview` 本地适配器与视觉收口规格 | 需要核对编排面板、`muweave doctor --capabilities` 或零费用本地适配器时 |
 | [f1-delivery.md](./f1-delivery.md) | 参考（不改） | F1 的实现范围、证据、提交和已知未做项 | 需要核对 F1 已交付事实或验证数字时 |
 | [schedule-v2-delivery.md](./schedule-v2-delivery.md) | 参考（不改） | 已交付的排期项目维度、legacy 处理与验证数字 | 需要核对排期归属判定依据时 |
 | [f2-delivery.md](./f2-delivery.md) | 参考（不改） | F2 的实现范围、证据、提交和已知未做项 | 需要核对 F2 认领向导事实或验证数字时 |
