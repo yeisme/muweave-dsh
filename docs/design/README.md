@@ -16,6 +16,7 @@
 | [tri-surface-cli-mcp-v5.md](./tri-surface-cli-mcp-v5.md) | 现行 | v5 三端合一（Creator CLI、Demo 种子、本地 stdio / 远程 HTTP MCP 与 UX 升级）规格 | 需要核对 `muweave` CLI、MCP 工具/鉴权或 Kit 接入向导时 |
 | [orchestration-ecosystem-v6.md](./orchestration-ecosystem-v6.md) | 现行 | v6 多 Agent 编排控制面、能力预检、`demo.image.preview` 本地适配器与视觉收口规格 | 需要核对编排面板、`muweave doctor --capabilities` 或零费用本地适配器时 |
 | [bridge-cut-export-v7.md](./bridge-cut-export-v7.md) | 现行 | v7 自定义引擎 Bridge、多集无损粗剪层与 FCPXML 1.10 / 剪映便携导出规格 | 需要核对 `adapter.custom.*` SSRF/零密钥围栏、`drama.cut.*` 或 `--bundle-dir` 导出时 |
+| [qc-bible-review-deck-v8.md](./qc-bible-review-deck-v8.md) | 现行 | v8 连续性圣经、自动交付质检闸、离线甲方审片包 HTML、字幕导出与 9:16 安全区规格 | 需要核对 `project.bible.*`、`drama.qc.report`、`drama.shot.review.import` 或安全区叠加层时 |
 | [f1-delivery.md](./f1-delivery.md) | 参考（不改） | F1 的实现范围、证据、提交和已知未做项 | 需要核对 F1 已交付事实或验证数字时 |
 | [schedule-v2-delivery.md](./schedule-v2-delivery.md) | 参考（不改） | 已交付的排期项目维度、legacy 处理与验证数字 | 需要核对排期归属判定依据时 |
 | [f2-delivery.md](./f2-delivery.md) | 参考（不改） | F2 的实现范围、证据、提交和已知未做项 | 需要核对 F2 认领向导事实或验证数字时 |

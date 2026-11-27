@@ -2,6 +2,21 @@
 
 All notable milestones of the MuWeave DSH Creator Plugin Suite & `.muweave/` workspace bundle are documented here.
 
+## v8 — Continuity Bible, Automated QC Gate, Offline Client Review Deck & 9:16 Safe-Zone (2026-11-27)
+
+- **Project Continuity Bible (`project.bible.get/set`)**:
+  - Added `ContinuityBibleStore` (`continuity-bible.v1.json`, `0600` atomic write, `.corrupt-*` backup, hex validation, `expectedRevision` optimistic locking → `muweave/bible_revision_conflict`, credential/host-path guard → `muweave/invalid_bible_input`).
+  - Added 「片场连续性圣经」 (`.mw-bible-card`) inside Eikona's `masters` tab with save and 「`@` 注入助手」 staging, plus `eikona-bible-1440x900.png` E2E capture.
+- **Automated Episode QC Gate (`drama.qc.report`)**:
+  - Added zero-cost 5-pillar `runEpisodeQc` (opening hook/duration, visual/audio/CAS/lip-sync risk, blocked 4-axis assets, director review gate, compliance disclosure) returning `0–100` score and `readyForDelivery`.
+  - Added collapsible `.dr-qc-strip` in Drama `storyboard` & `timeline` with clickable shot findings opening `ShotInspector`.
+- **SRT/WebVTT Subtitles, Offline Client Review Deck HTML & Safe Feedback Import**:
+  - Extended `drama.export.manifest` & `muweave export` with `srt_subtitles`, `webvtt_subtitles`, and zero-CDN `review_deck_html` (HTML/`</script>`-escaped 9:16 preview + `review-feedback.json` download; `--bundle-dir` also writes `subtitles.srt`).
+  - Added `DramaReviewStore.importFeedback` & `drama.shot.review.import` (skipping `locked` shots as `skipped_locked` by default) plus Timeline 「导入甲方反馈 JSON」 upload UI.
+- **9:16 Safe-Zone Overlay, CLI & MCP (18 Tools / 8 Resources)**:
+  - Added opt-in `9:16 安全区` toggle & non-interactive `.dr-safe-zone-overlay` in `AnimaticPlayer`.
+  - Added CLI `muweave bible`, `muweave qc`, `muweave review import`, MCP `muweave_project_bible` & `muweave_drama_qc_report` (18 tools, zero `job.approve`), and resources `muweave://project/bible` & `muweave://drama/qc` (8 resources).
+
 ## v7 — Custom Engine Bridge, Multi-Episode Non-Destructive Cut & NLE Portable Export (2026-11-27)
 
 - **Zero-Secret Custom Engine Bridge**:

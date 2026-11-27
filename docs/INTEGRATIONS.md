@@ -89,11 +89,12 @@ sonora sfx job get <job-id> --json
 
 ## 5 没有引擎时能做什么
 
-三种用法，按投入从低到高：
+四种用法，按投入从低到高：
 
-1. **只用规划与审核**：剧本、分镜、排期、审核、成本记录都不依赖引擎，插件可以直接当「创作账本 + 审核台」用；
-2. **接自己的引擎**：按第 4 节的契约实现同名 CLI（或写一个薄 shell 包装转发到你的服务），把二进制放进 PATH 即可被探测到；
-3. **等开源**：引擎陆续开源后，按第 2 节的表补链接，插件侧不需要改。
+1. **5 秒零成本全链路体验**：运行 `pnpm muweave demo seed --episodes 2` 生成示例工作区，并显式设置 `MUWEAVE_LOCAL_PREVIEW_ADAPTER=1` 启用零费用本地预览适配器（`demo.image.preview`，默认关闭），无需外部 API 即可走通 `estimate → approve → submit → slot review → linkToShot`；
+2. **接入自定义外部引擎 Bridge（零明文密钥）**：在工具箱「外部引擎 Bridge 配置」或 `pnpm muweave adapters` 中登记 `openai_http`（OpenAI 兼容出图/配音）、`comfyui_http`（本地/局域网 ComfyUI）或无 shell `cli_wrapper`（配置持久化于 `pluginDataDir/custom-adapters.v1.json`，仅存环境变量名 `authEnvVar`，全程走 `paidEnabled`、`dailyCap` 与人工审批闸）；
+3. **只用规划、连续性圣经、质检与交付**：剧本、分镜、连续性圣经、5 维自动质检（`muweave qc`）、离线甲方审片包 HTML、SRT/WebVTT 字幕、FCPXML/剪映/EDL 导出与排期均不依赖外部引擎；
+4. **接入官方 owner CLI 或自建同名 CLI**：按第 4 节契约放进 PATH，运行 `pnpm muweave doctor --capabilities` 即可零费用检查每项能力的可用性与阻塞修复指引。
 
 ## 6 自己写一个 owner 适配器
 
