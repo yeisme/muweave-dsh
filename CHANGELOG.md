@@ -2,6 +2,18 @@
 
 All notable milestones of the MuWeave DSH Creator Plugin Suite & `.muweave/` workspace bundle are documented here.
 
+## v9 — Modular Header Architecture & 4 Standalone Studio Plugins (2026-11-28)
+
+- **Modular Header & Built-in Module Manager (`muweave-modules`)**:
+  - Grouped header navigation into `pipeline | studio | ops` with `.mw-room-nav-sep`, 5 role presets (`all`, `director`, `art_canvas`, `audio_edit`, `producer`), pin/reorder customization persisted via `WorkspaceTabsStore` (`workspace.tabs.get|save|reset`), and `Alt+1..9` bound to the first 9 visible header rooms.
+- **4 New Standalone DSH Studio Plugins (10 Plugins / 12 Rooms Total)**:
+  - **`@yeisme/dsh-muweave-canvas` (`画布`)**: Pan/zoom spatial node canvas, auto-layout from active episode, `CanvasBoardStore` (`canvas.board.*`), and sanitized Mermaid export.
+  - **`@yeisme/dsh-muweave-stage3d` (`3D导演台`)**: Zero-dependency Canvas2D 3D perspective stage (`24–135mm`), 5 camera presets, top-down floorplan, 180° axis-crossing detection, structured camera prompts, `Stage3dStore` (`stage3d.scene.*`), and PNG-validated CAS `stage3d.snapshot.save` binding directly to shot `reference`.
+  - **`@yeisme/dsh-muweave-audio` (`音画台`)**: Master + 3-track (`voice`/`music`/`sfx`) mute/solo/gain (`0–150%`)/fade (`0–10000ms`) via `AudioMixStore` (`audio.mix.*`), missing-voice TTS launch, `>8s` lip-sync cues, and SRT/VTT export.
+  - **`@yeisme/dsh-muweave-assets` (`资产库`)**: Cross-domain central asset catalog, 4-axis readiness dots, bind-to-shot, `@` staging, and bidirectional asset↔shot usage matrix.
+- **CLI, MCP (22 Tools / 12 Resources) & Full 10-Plugin Gate**:
+  - Added CLI `muweave tabs|canvas|stage3d|audio`, MCP tools `muweave_workspace_tabs`, `muweave_canvas_board`, `muweave_stage3d_scene`, `muweave_audio_mix` (22 tools / 12 resources, zero `job.approve`), expanded `tests/styles-static.test.ts` and `scripts/inner-e2e-runner.mjs` across all 10 plugins, and updated `docs/design/tab-room-mapping.md`.
+
 ## v8 — Continuity Bible, Automated QC Gate, Offline Client Review Deck & 9:16 Safe-Zone (2026-11-27)
 
 - **Project Continuity Bible (`project.bible.get/set`)**:

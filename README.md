@@ -1,20 +1,21 @@
-# 幕织 MuWeave · DeepSeek Harness 创作插件矩阵（v8）
+# 幕织 MuWeave · DeepSeek Harness 创作插件矩阵（v9）
 
 一套跑在 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（下称 DSH）里的三端合一（**DSH 剧场 UI + Creator CLI + 本地/远程 MCP Server**）短剧/漫剧创作工作台：把「做一部漫剧 / 竖屏短剧」的六个阶段——**灵感 → 剧本 → 视觉 → 分镜 → 声音 → 成片交付**——做成一条可审核、可质检、可无损粗剪、可回滚、可排期的流水线，而不是一堆生成按钮。
 
 面向一人或 2–3 人的创作小组：真正的瓶颈不是「生成不出一张好图」，而是生成之后的**连续性管控、挑镜、导演审片、质检、粗剪导出与排期**。
 
-> **架构边界**：本仓库是编排与交付层（UI / 审核 / 连续性圣经 / 质检 / 无损粗剪 / 账本 / 能力网关 / CLI / MCP）。`.muweave/` 是可重建的物化元件目录，绝不直接改写 `.eikona/**`、`.auctra/**`、`.scaena/**` 内部数据库。详见 [docs/INTEGRATIONS.md](./docs/INTEGRATIONS.md)。
+> **架构边界**：本仓库是编排与交付层（UI / 审核 / 连续性圣经 / 质检 / 无损粗剪 / 空间画布 / 3D 预演 / 混音 / 资产库 / 账本 / 能力网关 / CLI / MCP）。`.muweave/` 是可重建的物化元件目录，绝不直接改写 `.eikona/**`、`.auctra/**`、`.scaena/**` 内部数据库。详见 [docs/INTEGRATIONS.md](./docs/INTEGRATIONS.md)。
 
-## 当前能力总览（v8）
+## 当前能力总览（v9）
 
 | 维度 | 当前状态 |
 | --- | --- |
-| 三端架构 | **7 房间 DSH 剧场 UI**（总览 / 视觉 / 剧本 / 分镜生产 / 成稿 / 工具箱 / 排期）+ **`muweave` Creator CLI** + **本地 stdio / 远程 Streamable HTTP MCP Server** |
+| 三端与模块化架构 | **10 个独立 DSH 插件包 / 12 个房间**（3 分组可定制顶栏 `pipeline \| studio \| ops` + 内置 **模块台** 5 套角色预设）+ **`muweave` Creator CLI** + **本地 stdio / 远程 Streamable HTTP MCP Server** |
+| 4 大专业工作室（v9） | **空间画布**（`画布`：无限平移缩放、自动铺开、Mermaid 导出）+ **3D 导演预演台**（`3D导演台`：24–135mm 透视、180° 越轴预警、3D 灰模 PNG 绑定镜头）+ **多轨音画台**（`音画台`：voice/music/sfx 混音与口型卡点）+ **中央资产库**（`资产库`：跨集双向引用矩阵） |
 | 作剧生产台 | 6 轨媒体检查器（`keyframe / reference / video / voice / music / sfx`）+ 5 态乐观锁导演审片 + 原生 HTML5 9:16/16:9 `AnimaticPlayer`（含 **9:16 安全区叠加层**）+ 多集无损粗剪（重排/裁时长/隐藏/转场）+ 批量审片 + 导演键盘流 |
 | 连续性、质检与交付 | **片场连续性圣经**（`project.bible.*`）+ **5 维自动交付质检闸**（`drama.qc.report`）+ **离线甲方审片包 HTML**（零 CDN）与安全反馈回导（默认保护已锁定镜头）+ **FCPXML 1.10 / 剪映草稿 / CMX 3600 EDL / Cut Manifest / CSV / SRT / WebVTT** + `--bundle-dir` 便携媒体包 |
 | 引擎生态与编排 | 内置 **Custom Engine Bridge**（OpenAI / ComfyUI / CLI Wrapper，零明文密钥 + SSRF/HTTPS 围栏）+ 可选零费用 `MUWEAVE_LOCAL_PREVIEW_ADAPTER=1` + `muweave doctor --capabilities` + 多 Agent 编排断路器与级联取消 |
-| 验证与跨平台 E2E | `pnpm typecheck`、`pnpm test`（覆盖宿主 RPC、Bundle、CLI、MCP、样式静态门禁与全房间 UI）、`pnpm build`、`pnpm pack:plugins` 与 **macOS + Linux 双平台真机 Playwright E2E**（产出 6 文件脱敏证据包） |
+| 验证与跨平台 E2E | `pnpm typecheck`、`pnpm test`（覆盖宿主 RPC、Bundle、CLI、MCP、10 插件样式静态门禁与全房间 UI）、`pnpm build`、`pnpm pack:plugins`（10 `.tgz`）与 **macOS + Linux 双平台真机 Playwright E2E**（产出 6 文件脱敏证据包） |
 
 ## 现在怎么用（4 条路径）
 
@@ -33,8 +34,12 @@
 | `@yeisme/dsh-muweave-eikona` | 插件 2（视觉） | 视觉候选画廊、2-up/4-up 对比、一键绑镜、母版与**片场连续性圣经**编辑器 |
 | `@yeisme/dsh-muweave-script` | 插件 3（剧本） | 多集切换、剧本双时间轴、Scene Card 草稿/提交、线性阅读模式、Context Graph 与 stale diff |
 | `@yeisme/dsh-muweave-drama` | 插件 4（分镜生产） | 多集无损粗剪、6 轨 `ShotInspector` + Filmstrip、9:16 安全区 `AnimaticPlayer`、交付质检条、NLE/字幕/离线审片包导出与甲方反馈回导 |
-| `@yeisme/dsh-muweave-kit` | 插件 5（工具箱） | `muweave-creator` 智能体预设与窄工具、中文 `/` 创作技能、提示词配方、CLI/MCP 接入向导与外部引擎 Bridge 配置 |
-| `@yeisme/dsh-muweave-schedule` | 插件 6（排期） | 发布排期月历导航头、待排池搜索与域筛选、项目作用域排期与撤销栈 |
+| `@yeisme/dsh-muweave-canvas` | 插件 5（画布） | 无限平移/缩放空间画布、自动铺开当前集、节点连线与 Mermaid 导出 |
+| `@yeisme/dsh-muweave-stage3d` | 插件 6（3D导演台） | 零依赖 Canvas2D 3D 透视预演、5 套机位预设、180° 越轴预警、机位提示词与 3D 灰模 PNG 绑镜 |
+| `@yeisme/dsh-muweave-audio` | 插件 7（音画台） | Master + 3 轨（voice/music/sfx）混音、缺配音唤起 TTS、台词字幕卡点与 `>8s` 口型预警 |
+| `@yeisme/dsh-muweave-assets` | 插件 8（资产库） | 跨领域中央资产库、4 轴就绪点、绑定镜头与跨集资产↔镜头双向引用矩阵 |
+| `@yeisme/dsh-muweave-kit` | 插件 9（工具箱） | `muweave-creator` 智能体预设与窄工具、中文 `/` 创作技能、提示词配方、CLI/MCP 接入向导与外部引擎 Bridge 配置 |
+| `@yeisme/dsh-muweave-schedule` | 插件 10（排期） | 发布排期月历导航头、待排池搜索与域筛选、项目作用域排期与撤销栈 |
 
 ## 环境要求与快速开始
 
@@ -84,7 +89,14 @@ pnpm muweave export srt_subtitles --workspace ./demo-ep01 --episode episode:01 -
 pnpm muweave export webvtt_subtitles --workspace ./demo-ep01 --episode episode:01 --out ./ep01.vtt
 pnpm muweave export review_deck_html --workspace ./demo-ep01 --episode episode:01 --bundle-dir ./client-review-deck
 
-# 5. 外部引擎 Bridge、排期与多 Agent 编排控制
+# 5. 模块化顶栏、画布、3D 导演台与音画混音
+pnpm muweave tabs show --workspace ./demo-ep01
+pnpm muweave tabs preset director --workspace ./demo-ep01
+pnpm muweave canvas export-mermaid --workspace ./demo-ep01
+pnpm muweave stage3d export-prompts --workspace ./demo-ep01
+pnpm muweave audio show --workspace ./demo-ep01
+
+# 6. 外部引擎 Bridge、排期与多 Agent 编排控制
 pnpm muweave adapters list --workspace ./demo-ep01
 pnpm muweave bots list --workspace ./demo-ep01
 pnpm muweave tasks list --workspace ./demo-ep01
@@ -93,7 +105,7 @@ pnpm muweave schedule list --workspace ./demo-ep01
 
 ## MCP Server（本地 stdio / 远程 HTTP）接入指南
 
-`@yeisme/dsh-muweave-core` 内置零新增依赖的 MCP JSON-RPC 2.0 服务（**18 个脱敏工具、8 个 `muweave://*` 实时资源、3 个创作提示词**），覆盖工作区状态、分镜审片、无损粗剪、NLE/字幕/审片包导出、排期、诊断、连续性圣经、交付质检、自定义 Bridge 与多 Agent 编排控制，**绝不暴露 `job.approve` 等自动付费审批动作**。
+`@yeisme/dsh-muweave-core` 内置零新增依赖的 MCP JSON-RPC 2.0 服务（**22 个脱敏工具、12 个 `muweave://*` 实时资源、3 个创作提示词**），覆盖工作区状态、分镜审片、无损粗剪、NLE/字幕/审片包导出、排期、诊断、连续性圣经、交付质检、自定义 Bridge、模块化顶栏、空间画布、3D 机位、音画混音与多 Agent 编排控制，**绝不暴露 `job.approve` 等自动付费审批动作**。
 
 ### 1. 本地 stdio（Claude Desktop / Cursor 等）
 

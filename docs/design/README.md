@@ -11,12 +11,13 @@
 | [project-features-next.md](./project-features-next.md) | 现行 | F1、F2、F3 的事实、状态映射与剩余边界 | 需要查看项目管理功能的事实、判断和依赖时 |
 | [f3-spec.md](./f3-spec.md) | 现行 | F3 项目诊断的只读契约、异常映射和交互验收 | 需要核对已交付诊断契约或后续评审时 |
 | [project-management-arch.md](./project-management-arch.md) | 现行 | 项目注册表、RPC 边界、P0-P2 架构验收 | 需要核对项目数据边界、错误码和长期兼容预留时 |
-| [tab-room-mapping.md](./tab-room-mapping.md) | 现行 | 7 个剧场 room 与 21 个 stage tab 的源码映射 | 需要核对 room、plugin owner、stage tab ID 或 9-tab 口径时 |
+| [tab-room-mapping.md](./tab-room-mapping.md) | 现行 | 10 插件 / 12 剧场 room 与 29 个 stage tab 的源码映射 | 需要核对 room、分组、plugin owner 或 stage tab ID 时 |
 | [drama-studio-v2.md](./drama-studio-v2.md) | 现行 | Drama Studio v2/v3 导演审片、6 轨媒体、Animatic、粗剪导出与多 Agent P3 规格 | 需要核对 `muweave-drama` v2/v3 RPC 契约、导出格式、UI 交互或 P3 级联取消时 |
 | [tri-surface-cli-mcp-v5.md](./tri-surface-cli-mcp-v5.md) | 现行 | v5 三端合一（Creator CLI、Demo 种子、本地 stdio / 远程 HTTP MCP 与 UX 升级）规格 | 需要核对 `muweave` CLI、MCP 工具/鉴权或 Kit 接入向导时 |
 | [orchestration-ecosystem-v6.md](./orchestration-ecosystem-v6.md) | 现行 | v6 多 Agent 编排控制面、能力预检、`demo.image.preview` 本地适配器与视觉收口规格 | 需要核对编排面板、`muweave doctor --capabilities` 或零费用本地适配器时 |
 | [bridge-cut-export-v7.md](./bridge-cut-export-v7.md) | 现行 | v7 自定义引擎 Bridge、多集无损粗剪层与 FCPXML 1.10 / 剪映便携导出规格 | 需要核对 `adapter.custom.*` SSRF/零密钥围栏、`drama.cut.*` 或 `--bundle-dir` 导出时 |
 | [qc-bible-review-deck-v8.md](./qc-bible-review-deck-v8.md) | 现行 | v8 连续性圣经、自动交付质检闸、离线甲方审片包 HTML、字幕导出与 9:16 安全区规格 | 需要核对 `project.bible.*`、`drama.qc.report`、`drama.shot.review.import` 或安全区叠加层时 |
+| [modular-studio-tabs-v9.md](./modular-studio-tabs-v9.md) | 现行 | v9 模块化顶栏（3 分组 + 5 预设 + 模块台）与 4 大专业工作室（画布 / 3D导演台 / 音画台 / 资产库）规格 | 需要核对 `workspace.tabs.*`、`canvas.*`、`stage3d.*`、`audio.mix.*` 或 10 插件架构时 |
 | [f1-delivery.md](./f1-delivery.md) | 参考（不改） | F1 的实现范围、证据、提交和已知未做项 | 需要核对 F1 已交付事实或验证数字时 |
 | [schedule-v2-delivery.md](./schedule-v2-delivery.md) | 参考（不改） | 已交付的排期项目维度、legacy 处理与验证数字 | 需要核对排期归属判定依据时 |
 | [f2-delivery.md](./f2-delivery.md) | 参考（不改） | F2 的实现范围、证据、提交和已知未做项 | 需要核对 F2 认领向导事实或验证数字时 |
