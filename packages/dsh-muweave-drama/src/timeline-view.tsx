@@ -1,17 +1,21 @@
-import { useState, type CSSProperties } from 'react'
+import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
 import {
   Callout,
   EmptyState,
   SHOT_MEDIA_ROLE_LIST,
   SectionHead,
+  StatusTag,
   mediaForRole,
   shotReadinessSummary,
   type DramaExportFormat,
   type DramaExportResultV1,
+  type EpisodeQcReportV1,
   type MuweaveElementSummaryV1,
   type MuweaveElementV1,
   type MuweaveRpcClient,
   type MuweaveTranslator,
+  type ShotReviewImportItemV1,
+  type ShotReviewImportResultV1,
   type ShotReviewRecordV1,
   type WorkspaceNotice,
 } from '@yeisme/dsh-muweave-core/client'
@@ -160,6 +164,8 @@ export interface TimelineViewProps {
   shotRows: readonly StoryboardRow[]
   reviewsByShot: Record<string, ShotReviewRecordV1>
   episodeRef?: string
+  qcReport?: EpisodeQcReportV1 | null
+  onReviewsImported?: () => Promise<void> | void
   onInspectShot: (shotRef: string) => void
   onNotice?: (notice: WorkspaceNotice) => void
   t: (k: string) => string
@@ -173,6 +179,8 @@ export function TimelineView({
   shotRows,
   reviewsByShot,
   episodeRef,
+  qcReport,
+  onReviewsImported,
   onInspectShot,
   onNotice,
   t,
@@ -182,6 +190,10 @@ export function TimelineView({
   const [exportReceipt, setExportReceipt] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [mdCopied, setMdCopied] = useState(false)
+  const [importingFeedback, setImportingFeedback] = useState(false)
+  const [importReceipt, setImportReceipt] = useState<string | null>(null)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
+  const lang = coreT('langCode')
 
   const handleCopyReviewMarkdown = async () => {
     const md = buildReviewSummaryMarkdown(shotRows, reviewsByShot, t)
@@ -190,6 +202,57 @@ export function TimelineView({
     const msg = t('reviewMdCopied')
     setExportReceipt(msg)
     onNotice?.({ tone: 'ok', text: msg })
+  }
+
+  const handleFeedbackFileChange = async (ev: ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0]
+    ev.target.value = ''
+    if (!file) return
+    setImportingFeedback(true)
+    setExportError(null)
+    setImportReceipt(null)
+    try {
+      const rawText = typeof file.text === 'function' ? await file.text() : await new Response(file).text()
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(rawText)
+      } catch {
+        const errText = t('importFeedbackParseError')
+        setExportError(errText)
+        onNotice?.({ tone: 'bad', text: errText })
+        return
+      }
+      const items: ShotReviewImportItemV1[] = Array.isArray(parsed)
+        ? (parsed as ShotReviewImportItemV1[])
+        : parsed && typeof parsed === 'object' && Array.isArray((parsed as { items?: unknown }).items)
+          ? ((parsed as { items: ShotReviewImportItemV1[] }).items)
+          : []
+      if (items.length === 0) {
+        const errText = t('importFeedbackParseError')
+        setExportError(errText)
+        onNotice?.({ tone: 'bad', text: errText })
+        return
+      }
+      const res = await rpc.call<ShotReviewImportResultV1 | { result?: ShotReviewImportResultV1 }>(
+        'drama.shot.review.import',
+        { items, allowLocked: false },
+      )
+      if (!res.ok) {
+        setExportError(res.error.message)
+        onNotice?.({ tone: 'bad', text: res.error.message })
+        return
+      }
+      const summary: ShotReviewImportResultV1 =
+        'result' in (res.data ?? {}) && (res.data as { result?: ShotReviewImportResultV1 }).result
+          ? (res.data as { result: ShotReviewImportResultV1 }).result
+          : (res.data as ShotReviewImportResultV1)
+      const receiptText = `${t('importFeedbackDone')}: ${summary.importedCount} · ${t('importFeedbackSkippedLocked')}: ${summary.skippedLockedCount} · ${t('importFeedbackInvalid')}: ${summary.invalidCount}`
+      setImportReceipt(receiptText)
+      onNotice?.({ tone: summary.invalidCount > 0 ? 'warn' : 'ok', text: receiptText })
+      await onReviewsImported?.()
+    } finally {
+      setImportingFeedback(false)
+    }
   }
 
   const handleExport = async (format: DramaExportFormat, fps: number, aspectRatio: string) => {
@@ -255,6 +318,24 @@ export function TimelineView({
 
   return (
     <div className="mw-stack" data-gap="lg" data-drama-timeline-view="true">
+      {qcReport ? (
+        <div className="mw-spread" data-timeline-qc-badge="true">
+          <span className="mw-row" data-gap="xs">
+            <span className="mw-eyebrow">{t('qcTitle')}</span>
+            <strong className="mw-num">{qcReport.score}/100</strong>
+            <StatusTag
+              status={qcReport.readyForDelivery ? 'ready' : 'blocked'}
+              lang={lang}
+              label={qcReport.readyForDelivery ? t('qcReady') : t('qcBlocked')}
+            />
+          </span>
+          <span className="mw-dsh-muted">
+            {t('qcBlocker')} {qcReport.counts.blocker} · {t('qcWarning')} {qcReport.counts.warning} · {t('qcPass')}{' '}
+            {qcReport.counts.pass}
+          </span>
+        </div>
+      ) : null}
+
       <div className="dr-export-bar mw-spread" data-drama-export-bar="true">
         <span className="mw-dsh-muted">
           {t('aspect')} {primaryAspect} · {primaryFps} fps
@@ -322,13 +403,75 @@ export function TimelineView({
             className="mw-dsh-btn"
             data-size="sm"
             data-variant="quiet"
+            data-export-format="srt_subtitles"
+            data-drama-export-srt="true"
+            disabled={exportingFormat !== null}
+            onClick={() => void handleExport('srt_subtitles', primaryFps, primaryAspect)}
+          >
+            {t('exportSrt')}
+          </button>
+          <button
+            type="button"
+            className="mw-dsh-btn"
+            data-size="sm"
+            data-variant="quiet"
+            data-export-format="webvtt_subtitles"
+            data-drama-export-vtt="true"
+            disabled={exportingFormat !== null}
+            onClick={() => void handleExport('webvtt_subtitles', primaryFps, primaryAspect)}
+          >
+            {t('exportVtt')}
+          </button>
+          <button
+            type="button"
+            className="mw-dsh-btn"
+            data-size="sm"
+            data-variant="quiet"
+            data-export-format="review_deck_html"
+            data-drama-export-review-html="true"
+            disabled={exportingFormat !== null}
+            onClick={() => void handleExport('review_deck_html', primaryFps, primaryAspect)}
+          >
+            {t('exportReviewDeckHtml')}
+          </button>
+          <button
+            type="button"
+            className="mw-dsh-btn"
+            data-size="sm"
+            data-variant="quiet"
             data-drama-copy-review-md="true"
             onClick={() => void handleCopyReviewMarkdown()}
           >
             {t('copyReviewMarkdown')}
           </button>
+          <button
+            type="button"
+            className="mw-dsh-btn"
+            data-size="sm"
+            data-variant="quiet"
+            data-drama-import-feedback="true"
+            disabled={importingFeedback}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {t('importFeedbackJson')}
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            aria-label={t('importFeedbackJson')}
+            data-drama-import-feedback-input="true"
+            className="dr-import-hidden-input"
+            onChange={(ev) => void handleFeedbackFileChange(ev)}
+          />
         </div>
       </div>
+
+      {importReceipt ? (
+        <p className="mw-dsh-muted" role="status" data-drama-import-receipt="true">
+          {importReceipt}
+        </p>
+      ) : null}
 
       {mdCopied ? (
         <p className="mw-dsh-muted" role="status" data-drama-md-copied="true">

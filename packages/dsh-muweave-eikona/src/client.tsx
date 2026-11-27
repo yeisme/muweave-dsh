@@ -79,6 +79,25 @@ const zh = {
   gallerySearchPlaceholder: '搜索候选 ID / 提示词 / 角色…',
   galleryFilterAll: '全部状态',
   galleryNoMatch: '当前筛选条件下无视觉候选',
+  bibleTitle: '片场连续性圣经 (Continuity Bible)',
+  bibleHint: '锁定全片画幅、镜头语言、角色造型锚点与 AI 合规声明，避免跨镜头漂移。',
+  bibleAspectRatio: '默认画幅',
+  bibleLensStyle: '镜头语言',
+  bibleLightingRule: '光影基调',
+  bibleStyleDirective: '风格总指令',
+  bibleNegativeGuardrails: '负向护栏（每行一条）',
+  bibleComplianceDisclosure: 'AI 合规披露声明',
+  bibleAnchorsTitle: '角色造型锚点',
+  bibleAddAnchor: '新增角色锚点',
+  bibleRemoveAnchor: '移除',
+  bibleAnchorName: '角色名',
+  bibleAnchorWardrobe: '服装 / 道具',
+  bibleAnchorTraits: '不可变特征',
+  bibleSave: '保存连续性圣经',
+  bibleSaving: '保存中…',
+  bibleSaved: '连续性圣经已保存',
+  bibleConflict: '连续性圣经版本冲突，请刷新后重试。',
+  bibleStageAgent: '@ 注入助手',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -127,6 +146,25 @@ const en: Record<keyof typeof zh, string> = {
   gallerySearchPlaceholder: 'Search artifact, prompt, handle…',
   galleryFilterAll: 'All Statuses',
   galleryNoMatch: 'No candidates match this filter',
+  bibleTitle: 'Continuity Bible',
+  bibleHint: 'Lock aspect ratio, lens & lighting grammar, character anchors, and AI disclosure across shots.',
+  bibleAspectRatio: 'Aspect Ratio',
+  bibleLensStyle: 'Lens Style',
+  bibleLightingRule: 'Lighting Rule',
+  bibleStyleDirective: 'Style Directive',
+  bibleNegativeGuardrails: 'Negative Guardrails (one per line)',
+  bibleComplianceDisclosure: 'AI Compliance Disclosure',
+  bibleAnchorsTitle: 'Character Anchors',
+  bibleAddAnchor: 'Add Anchor',
+  bibleRemoveAnchor: 'Remove',
+  bibleAnchorName: 'Name',
+  bibleAnchorWardrobe: 'Wardrobe',
+  bibleAnchorTraits: 'Immutable Traits',
+  bibleSave: 'Save Bible',
+  bibleSaving: 'Saving…',
+  bibleSaved: 'Continuity Bible saved',
+  bibleConflict: 'Bible revision conflict; reload and retry.',
+  bibleStageAgent: '@ Stage to Assistant',
 }
 
 export function EikonaIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -205,6 +243,28 @@ interface ShotOption {
   episodeRef?: string
 }
 
+interface BibleAnchorDraft {
+  name: string
+  wardrobe: string
+  immutableTraits: string
+}
+
+interface BibleResponseShape {
+  visualGrammar?: {
+    aspectRatio?: string
+    lensStyle?: string
+    lightingRule?: string
+    styleDirective?: string
+  }
+  characterAnchors?: Array<{ name?: string; wardrobe?: string; immutableTraits?: string }>
+  negativeGuardrails?: string[]
+  complianceDisclosure?: string
+  revision?: string
+}
+
+const BIBLE_GET = 'project.bible.get' as string as Parameters<MuweaveRpcClient['call']>[0]
+const BIBLE_SET = 'project.bible.set' as string as Parameters<MuweaveRpcClient['call']>[0]
+
 export function EikonaMainPage({
   rpc,
   t,
@@ -229,14 +289,59 @@ export function EikonaMainPage({
   const [bindTargetByCand, setBindTargetByCand] = useState<Record<string, { shotRef: string; role: 'keyframe' | 'reference' }>>({})
   const [bindingCandId, setBindingCandId] = useState<string | null>(null)
   const [lastBoundShot, setLastBoundShot] = useState<{ shotRef: string; artifactId: string; role: string } | null>(null)
+  const [bibleRevision, setBibleRevision] = useState<string>('')
+  const [bibleAspectRatio, setBibleAspectRatio] = useState<string>('9:16')
+  const [bibleLensStyle, setBibleLensStyle] = useState<string>('')
+  const [bibleLightingRule, setBibleLightingRule] = useState<string>('')
+  const [bibleStyleDirective, setBibleStyleDirective] = useState<string>('')
+  const [bibleNegativeGuardrails, setBibleNegativeGuardrails] = useState<string>('')
+  const [bibleComplianceDisclosure, setBibleComplianceDisclosure] = useState<string>('')
+  const [bibleAnchors, setBibleAnchors] = useState<BibleAnchorDraft[]>([])
+  const [bibleSaving, setBibleSaving] = useState<boolean>(false)
+  const [bibleReceipt, setBibleReceipt] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null)
   const lang = coreT('langCode')
   const covers = useProjectCovers(rpc, 3)
+
+  const applyBibleData = useCallback((bible: BibleResponseShape | undefined) => {
+    if (!bible || typeof bible !== 'object') return
+    setBibleRevision(typeof bible.revision === 'string' ? bible.revision : '')
+    setBibleAspectRatio(bible.visualGrammar?.aspectRatio ?? '9:16')
+    setBibleLensStyle(bible.visualGrammar?.lensStyle ?? '')
+    setBibleLightingRule(bible.visualGrammar?.lightingRule ?? '')
+    setBibleStyleDirective(bible.visualGrammar?.styleDirective ?? '')
+    setBibleNegativeGuardrails(Array.isArray(bible.negativeGuardrails) ? bible.negativeGuardrails.join('\n') : '')
+    setBibleComplianceDisclosure(bible.complianceDisclosure ?? '')
+    setBibleAnchors(
+      Array.isArray(bible.characterAnchors)
+        ? bible.characterAnchors.map((a) => ({
+            name: String(a.name ?? ''),
+            wardrobe: String(a.wardrobe ?? ''),
+            immutableTraits: String(a.immutableTraits ?? ''),
+          }))
+        : [],
+    )
+  }, [])
+
+  const loadBible = useCallback(async () => {
+    try {
+      const res = await rpc.call<{ bible?: BibleResponseShape }>(BIBLE_GET, {})
+      if (res?.ok) {
+        const payload = (res.data as { bible?: BibleResponseShape } | undefined)?.bible ?? (res.data as BibleResponseShape | undefined)
+        if (payload && typeof payload === 'object' && ('visualGrammar' in payload || 'revision' in payload)) {
+          applyBibleData(payload)
+        }
+      }
+    } catch {
+      // Gracefully tolerate older/mock hosts without project.bible.get.
+    }
+  }, [rpc, applyBibleData])
 
   const loadEikona = useCallback(async () => {
     const [res, sbRes] = await Promise.all([
       rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { domain: 'eikona' }),
       rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { kind: 'drama.storyboard_table' }),
     ])
+    await loadBible()
     if (res.ok) {
       setElements(res.data.elements)
       const detailEntries = await Promise.all(
@@ -670,23 +775,282 @@ export function EikonaMainPage({
         {
           id: 'masters',
           label: () => t('tabMasters'),
-          render: () =>
-            masterBindings.length === 0 ? (
-              <EmptyState icon="star">{coreT('emptyElements')}</EmptyState>
-            ) : (
-              <div className="mw-grid-auto" style={{ '--mw-card-min': '16rem' } as CSSProperties}>
-                {masterBindings.map((m) => (
-                  <article key={m.elementId} className="mw-dsh-card">
-                    <div className="mw-spread">
-                      <span className="mw-title">{m.title}</span>
-                      <StatusTag status={m.status} lang={lang} />
+          render: () => {
+            const handleSaveBible = async () => {
+              setBibleSaving(true)
+              setBibleReceipt(null)
+              try {
+                const guardrails = bibleNegativeGuardrails
+                  .split(/\r?\n/)
+                  .map((line) => line.trim())
+                  .filter(Boolean)
+                const anchors = bibleAnchors
+                  .map((a) => ({
+                    name: a.name.trim(),
+                    wardrobe: a.wardrobe.trim(),
+                    immutableTraits: a.immutableTraits.trim(),
+                  }))
+                  .filter((a) => a.name.length > 0)
+                const res = await rpc.call<{ bible?: BibleResponseShape }>(BIBLE_SET, {
+                  visualGrammar: {
+                    aspectRatio: bibleAspectRatio.trim() || '9:16',
+                    lensStyle: bibleLensStyle.trim(),
+                    lightingRule: bibleLightingRule.trim(),
+                    styleDirective: bibleStyleDirective.trim(),
+                  },
+                  characterAnchors: anchors,
+                  negativeGuardrails: guardrails,
+                  complianceDisclosure: bibleComplianceDisclosure.trim(),
+                  ...(bibleRevision ? { expectedRevision: bibleRevision } : {}),
+                })
+                if (!res?.ok) {
+                  const isConflict = res?.error?.code === 'muweave/bible_revision_conflict'
+                  setBibleReceipt({
+                    tone: 'bad',
+                    text: isConflict ? t('bibleConflict') : (res?.error?.message ?? '保存失败'),
+                  })
+                  return
+                }
+                const saved = (res.data as { bible?: BibleResponseShape } | undefined)?.bible ?? (res.data as BibleResponseShape | undefined)
+                if (saved) applyBibleData(saved)
+                setBibleReceipt({ tone: 'ok', text: t('bibleSaved') })
+              } finally {
+                setBibleSaving(false)
+              }
+            }
+
+            const handleStageBible = () => {
+              const anchorNames = bibleAnchors
+                .map((a) => a.name.trim())
+                .filter(Boolean)
+                .join(', ')
+              const summaryParts = [
+                `aspect=${bibleAspectRatio || '9:16'}`,
+                bibleLensStyle ? `lens=${bibleLensStyle}` : '',
+                bibleLightingRule ? `lighting=${bibleLightingRule}` : '',
+                anchorNames ? `anchors=${anchorNames}` : '',
+              ].filter(Boolean)
+              stageItemToFloatingAgent({
+                kind: 'project.continuity_bible' as unknown as 'element',
+                ref: 'project:continuity-bible',
+                label: t('bibleTitle'),
+                serializedLine: `[MuWeaveContinuityBible rev=${bibleRevision || 'draft'} ${summaryParts.join(' ')}]`,
+              })
+            }
+
+            return (
+              <div className="mw-stack" data-gap="lg">
+                <section
+                  className="mw-bible-card mw-dsh-card mw-stack"
+                  data-flat="true"
+                  data-gap="md"
+                  data-continuity-bible-card="true"
+                >
+                  <SectionHead
+                    title={t('bibleTitle')}
+                    meta={t('bibleHint')}
+                    actions={
+                      <button
+                        type="button"
+                        className="mw-dsh-btn"
+                        data-variant="quiet"
+                        data-size="sm"
+                        data-bible-stage-agent="true"
+                        onClick={handleStageBible}
+                      >
+                        {t('bibleStageAgent')}
+                      </button>
+                    }
+                  />
+                  <form
+                    className="mw-stack"
+                    data-gap="md"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      void handleSaveBible()
+                    }}
+                  >
+                    <div className="mw-bible-grid">
+                      <label className="mw-field">
+                        <span>{t('bibleAspectRatio')}</span>
+                        <input
+                          className="mw-input"
+                          type="text"
+                          data-bible-field="aspectRatio"
+                          value={bibleAspectRatio}
+                          onChange={(e) => setBibleAspectRatio(e.target.value)}
+                        />
+                      </label>
+                      <label className="mw-field">
+                        <span>{t('bibleLensStyle')}</span>
+                        <input
+                          className="mw-input"
+                          type="text"
+                          data-bible-field="lensStyle"
+                          value={bibleLensStyle}
+                          onChange={(e) => setBibleLensStyle(e.target.value)}
+                        />
+                      </label>
+                      <label className="mw-field">
+                        <span>{t('bibleLightingRule')}</span>
+                        <input
+                          className="mw-input"
+                          type="text"
+                          data-bible-field="lightingRule"
+                          value={bibleLightingRule}
+                          onChange={(e) => setBibleLightingRule(e.target.value)}
+                        />
+                      </label>
+                      <label className="mw-field">
+                        <span>{t('bibleStyleDirective')}</span>
+                        <input
+                          className="mw-input"
+                          type="text"
+                          data-bible-field="styleDirective"
+                          value={bibleStyleDirective}
+                          onChange={(e) => setBibleStyleDirective(e.target.value)}
+                        />
+                      </label>
+                      <label className="mw-field">
+                        <span>{t('bibleNegativeGuardrails')}</span>
+                        <textarea
+                          className="mw-input"
+                          rows={2}
+                          data-bible-field="negativeGuardrails"
+                          value={bibleNegativeGuardrails}
+                          onChange={(e) => setBibleNegativeGuardrails(e.target.value)}
+                        />
+                      </label>
+                      <label className="mw-field">
+                        <span>{t('bibleComplianceDisclosure')}</span>
+                        <input
+                          className="mw-input"
+                          type="text"
+                          data-bible-field="complianceDisclosure"
+                          value={bibleComplianceDisclosure}
+                          onChange={(e) => setBibleComplianceDisclosure(e.target.value)}
+                        />
+                      </label>
                     </div>
-                    {m.subtitle ? <span className="mw-dsh-muted">{m.subtitle}</span> : null}
-                    <code className="mw-dsh-code mw-dsh-muted">{m.sourceRef}</code>
-                  </article>
-                ))}
+
+                    <div className="mw-bible-anchors mw-stack" data-gap="xs">
+                      <div className="mw-spread">
+                        <span className="mw-eyebrow">{t('bibleAnchorsTitle')}</span>
+                        <button
+                          type="button"
+                          className="mw-dsh-btn"
+                          data-variant="quiet"
+                          data-size="sm"
+                          data-bible-add-anchor="true"
+                          onClick={() =>
+                            setBibleAnchors((prev) => [...prev, { name: '', wardrobe: '', immutableTraits: '' }])
+                          }
+                        >
+                          {t('bibleAddAnchor')}
+                        </button>
+                      </div>
+                      {bibleAnchors.map((anchor, idx) => (
+                        <div key={idx} className="mw-bible-anchor-row" data-bible-anchor-row={idx}>
+                          <input
+                            className="mw-input"
+                            type="text"
+                            placeholder={t('bibleAnchorName')}
+                            aria-label={t('bibleAnchorName')}
+                            value={anchor.name}
+                            onChange={(e) =>
+                              setBibleAnchors((prev) =>
+                                prev.map((row, i) => (i === idx ? { ...row, name: e.target.value } : row)),
+                              )
+                            }
+                          />
+                          <input
+                            className="mw-input"
+                            type="text"
+                            placeholder={t('bibleAnchorWardrobe')}
+                            aria-label={t('bibleAnchorWardrobe')}
+                            value={anchor.wardrobe}
+                            onChange={(e) =>
+                              setBibleAnchors((prev) =>
+                                prev.map((row, i) => (i === idx ? { ...row, wardrobe: e.target.value } : row)),
+                              )
+                            }
+                          />
+                          <input
+                            className="mw-input"
+                            type="text"
+                            placeholder={t('bibleAnchorTraits')}
+                            aria-label={t('bibleAnchorTraits')}
+                            value={anchor.immutableTraits}
+                            onChange={(e) =>
+                              setBibleAnchors((prev) =>
+                                prev.map((row, i) => (i === idx ? { ...row, immutableTraits: e.target.value } : row)),
+                              )
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="mw-dsh-btn"
+                            data-variant="ghost"
+                            data-size="sm"
+                            data-bible-remove-anchor={idx}
+                            onClick={() => setBibleAnchors((prev) => prev.filter((_, i) => i !== idx))}
+                          >
+                            {t('bibleRemoveAnchor')}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mw-row" data-gap="sm">
+                      <button
+                        type="submit"
+                        className="mw-dsh-btn"
+                        data-variant="primary"
+                        data-size="sm"
+                        disabled={bibleSaving}
+                        data-bible-save="true"
+                      >
+                        {bibleSaving ? t('bibleSaving') : t('bibleSave')}
+                      </button>
+                      {bibleRevision ? (
+                        <span className="mw-chip" data-mono="true" data-bible-revision={bibleRevision}>
+                          rev {bibleRevision}
+                        </span>
+                      ) : null}
+                      {bibleReceipt ? (
+                        <span
+                          className="mw-status"
+                          role="status"
+                          data-tone={bibleReceipt.tone}
+                          data-bible-receipt="true"
+                        >
+                          <span className="mw-dot" />
+                          {bibleReceipt.text}
+                        </span>
+                      ) : null}
+                    </div>
+                  </form>
+                </section>
+
+                {masterBindings.length === 0 ? (
+                  <EmptyState icon="star">{coreT('emptyElements')}</EmptyState>
+                ) : (
+                  <div className="mw-grid-auto" style={{ '--mw-card-min': '16rem' } as CSSProperties}>
+                    {masterBindings.map((m) => (
+                      <article key={m.elementId} className="mw-dsh-card">
+                        <div className="mw-spread">
+                          <span className="mw-title">{m.title}</span>
+                          <StatusTag status={m.status} lang={lang} />
+                        </div>
+                        {m.subtitle ? <span className="mw-dsh-muted">{m.subtitle}</span> : null}
+                        <code className="mw-dsh-code mw-dsh-muted">{m.sourceRef}</code>
+                      </article>
+                    ))}
+                  </div>
+                )}
               </div>
-            ),
+            )
+          },
         },
         {
           id: 'scores',

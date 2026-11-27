@@ -527,6 +527,22 @@ try {
       process.stdout.write(`Verified theater room [${room.name}] rendered .muweave/ elements (1440x900 + 390x844).\n`)
       continue
     }
+    if (room.name === 'eikona') {
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: path.join(artifactsDir, 'eikona-panel-1440x900.png') })
+      const mastersTab = page.getByRole('tab', { name: /^(母版|Masters)$/ }).first()
+      if ((await mastersTab.count()) > 0 && (await mastersTab.isVisible())) {
+        await mastersTab.click()
+        await page.locator('[data-continuity-bible-card="true"]').first().waitFor({ state: 'visible', timeout: 5_000 })
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(artifactsDir, 'eikona-bible-1440x900.png') })
+        const galleryTab = page.getByRole('tab', { name: /^(候选画廊|Gallery)$/ }).first()
+        if ((await galleryTab.count()) > 0) await galleryTab.click()
+        await page.waitForTimeout(150)
+      }
+      process.stdout.write(`Verified theater room [${room.name}] rendered candidates and Continuity Bible.\n`)
+      continue
+    }
     if (room.name === 'drama') {
       // Work-first: the shot board is the default view; the table sits behind the view switch.
       await page.locator('[data-drama-shot-board="true"]').first().waitFor({ state: 'visible', timeout: 5_000 })

@@ -6371,6 +6371,249 @@ button.dr-clip:focus-visible,
     padding: var(--mw-s-2);
   }
 }
+
+/* ---------- v8: 9:16 Safe-Zone Overlay, Episode QC Gate, Feedback Import & Continuity Bible ---------- */
+
+.dr-safe-zone-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.dr-safe-zone-top,
+.dr-safe-zone-right,
+.dr-safe-zone-bottom {
+  position: absolute;
+  background: color-mix(in oklch, var(--mw-bad) 16%, transparent);
+}
+
+.dr-safe-zone-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 12%;
+  border-bottom: 1px dashed color-mix(in oklch, var(--mw-bad) 55%, transparent);
+}
+
+.dr-safe-zone-right {
+  top: 12%;
+  right: 0;
+  bottom: 22%;
+  width: 16%;
+  border-left: 1px dashed color-mix(in oklch, var(--mw-bad) 55%, transparent);
+}
+
+.dr-safe-zone-bottom {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22%;
+  border-top: 1px dashed color-mix(in oklch, var(--mw-bad) 55%, transparent);
+}
+
+.dr-safe-zone-inner {
+  position: absolute;
+  top: 12%;
+  right: 16%;
+  bottom: 22%;
+  left: 6%;
+  border: 1px dashed color-mix(in oklch, var(--mw-ok) 75%, var(--mw-on-accent));
+  border-radius: var(--mw-r-1);
+}
+
+.dr-qc-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+  padding: var(--mw-s-3);
+  border-radius: var(--mw-r-xl);
+  border: 1px solid var(--mw-line);
+  background: var(--mw-card);
+  box-shadow: var(--mw-elev-1);
+  min-width: 0;
+}
+
+.dr-qc-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mw-s-2);
+}
+
+.dr-qc-score {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--mw-s-1);
+  font-family: var(--mw-mono);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--mw-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.dr-qc-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mw-s-1);
+}
+
+.dr-qc-findings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dr-qc-finding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mw-s-2);
+  width: 100%;
+  padding: var(--mw-s-1) var(--mw-s-2);
+  border-radius: var(--mw-r-2);
+  border: 1px solid var(--mw-line);
+  background: var(--mw-fill-1);
+  color: var(--mw-label);
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: start;
+  transition: background-color var(--mw-dur-fast) var(--mw-ease), border-color var(--mw-dur-fast) var(--mw-ease);
+}
+
+button.dr-qc-finding {
+  cursor: pointer;
+}
+
+.dr-qc-finding:hover {
+  border-color: var(--mw-line-strong);
+  background: var(--mw-fill-2);
+}
+
+.dr-qc-finding[data-severity="blocker"] {
+  box-shadow: inset 0.1875rem 0 0 var(--mw-bad);
+}
+
+.dr-qc-finding[data-severity="warning"] {
+  box-shadow: inset 0.1875rem 0 0 var(--mw-warn);
+}
+
+.dr-qc-finding[data-severity="pass"] {
+  box-shadow: inset 0.1875rem 0 0 var(--mw-ok);
+}
+
+.dr-import-feedback-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mw-s-2);
+  min-width: 0;
+}
+
+.dr-import-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mw-bible-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-3);
+  padding: var(--mw-s-4);
+  border-radius: var(--mw-r-xl);
+  border: 1px solid var(--mw-line);
+  background: var(--mw-card);
+  box-shadow: var(--mw-elev-1);
+  min-width: 0;
+}
+
+.mw-bible-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--mw-s-2) var(--mw-s-3);
+  min-width: 0;
+}
+
+.mw-bible-anchors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+  min-width: 0;
+}
+
+.mw-bible-anchor-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: var(--mw-s-2);
+  padding: var(--mw-s-2);
+  border-radius: var(--mw-r-2);
+  border: 1px solid var(--mw-line);
+  background: var(--mw-fill-1);
+  min-width: 0;
+}
+
+.mw-bible-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mw-s-1);
+}
+
+.mw-bible-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mw-s-1);
+  padding: 0.125rem var(--mw-s-2);
+  border-radius: var(--mw-r-pill);
+  border: 1px solid var(--mw-line-strong);
+  background: var(--mw-fill-1);
+  color: var(--mw-label);
+  font-family: var(--mw-mono);
+  font-size: 0.75rem;
+}
+
+.dr-qc-finding:focus-visible,
+.mw-bible-card button:focus-visible,
+.mw-bible-card input:focus-visible,
+.mw-bible-card textarea:focus-visible,
+.mw-bible-card select:focus-visible {
+  outline: 2px solid var(--mw-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dr-qc-finding {
+    transition: none;
+  }
+}
+
+@media (max-width: 48rem) {
+  .mw-bible-grid,
+  .mw-bible-anchor-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 30rem) {
+  .dr-qc-strip,
+  .mw-bible-card {
+    padding: var(--mw-s-2);
+  }
+}
 `
 
 interface SharedStyleHolder {

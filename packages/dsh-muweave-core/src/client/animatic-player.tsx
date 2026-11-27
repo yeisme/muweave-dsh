@@ -139,6 +139,7 @@ export function AnimaticPlayer({
           shot: 'Shot',
           kbdPlayPause: 'Play/Pause',
           kbdStep: 'Prev/Next',
+          safeZone: '9:16 Safe Zone',
         }
       : {
           title: 'Animatic 动态预演',
@@ -154,9 +155,11 @@ export function AnimaticPlayer({
           shot: '镜头',
           kbdPlayPause: '播停',
           kbdStep: '切镜',
+          safeZone: '9:16 安全区',
         }
 
   const [aspect, setAspect] = useState<AnimaticAspect>('9:16')
+  const [showSafeZone, setShowSafeZone] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [muted, setMuted] = useState(false)
 
@@ -354,15 +357,28 @@ export function AnimaticPlayer({
           </span>
           {review ? <StatusTag status={review.status} lang={lang} /> : null}
         </div>
-        <Segmented<AnimaticAspect>
-          label={labels.aspect}
-          value={aspect}
-          options={[
-            { value: '9:16', label: '9:16' },
-            { value: '16:9', label: '16:9' },
-          ]}
-          onChange={setAspect}
-        />
+        <div className="mw-row" data-gap="xs">
+          <button
+            type="button"
+            className="mw-dsh-btn"
+            data-variant="quiet"
+            data-size="sm"
+            aria-pressed={showSafeZone}
+            data-animatic-safezone-toggle="true"
+            onClick={() => setShowSafeZone((v) => !v)}
+          >
+            {labels.safeZone}
+          </button>
+          <Segmented<AnimaticAspect>
+            label={labels.aspect}
+            value={aspect}
+            options={[
+              { value: '9:16', label: '9:16' },
+              { value: '16:9', label: '16:9' },
+            ]}
+            onChange={setAspect}
+          />
+        </div>
       </div>
 
       <div className="dr-animatic-cinema">
@@ -388,6 +404,14 @@ export function AnimaticPlayer({
           )}
           {voiceUrl ? <audio ref={voiceRef} src={voiceUrl} muted={muted} data-muweave-animatic-voice="true" /> : null}
           {sfxUrl ? <audio ref={sfxRef} src={sfxUrl} muted={muted} data-muweave-animatic-sfx="true" /> : null}
+          {showSafeZone ? (
+            <div className="dr-safe-zone-overlay" data-safe-zone-overlay="true" aria-hidden="true">
+              <span className="dr-safe-zone-top" />
+              <span className="dr-safe-zone-right" />
+              <span className="dr-safe-zone-bottom" />
+              <span className="dr-safe-zone-inner" />
+            </div>
+          ) : null}
         </div>
       </div>
 

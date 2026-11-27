@@ -26,6 +26,7 @@ import {
   type CutTransitionKind,
   type DshClientContextLike,
   type EpisodeCutOverrideV1,
+  type EpisodeQcReportV1,
   type MuweaveElementSummaryV1,
   type MuweaveElementV1,
   type MuweaveRpcClient,
@@ -196,6 +197,24 @@ const zh = {
   transition_dip_to_black: '黑场 (Dip to Black)',
   exportFcpxml: '导出 FCPXML',
   exportJianying: '导出剪映草稿',
+  qcTitle: '交付质检',
+  qcReady: '可交付',
+  qcBlocked: '待修复',
+  qcBlocker: '阻塞',
+  qcWarning: '警告',
+  qcPass: '通过',
+  qcRefresh: '重新质检',
+  qcInspectShot: '定位镜头',
+  qcExpand: '展开详情',
+  qcCollapse: '收起详情',
+  exportSrt: '导出 SRT 字幕',
+  exportVtt: '导出 WebVTT 字幕',
+  exportReviewDeckHtml: '导出审片包 HTML',
+  importFeedbackJson: '导入甲方反馈 JSON',
+  importFeedbackDone: '已导入甲方反馈',
+  importFeedbackSkippedLocked: '跳过锁定',
+  importFeedbackInvalid: '无效项',
+  importFeedbackParseError: '反馈 JSON 格式无效，请提供包含 items 数组的 JSON 文件',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -336,6 +355,24 @@ const en: Record<keyof typeof zh, string> = {
   transition_dip_to_black: 'Dip to Black',
   exportFcpxml: 'Export FCPXML',
   exportJianying: 'Export Jianying Draft',
+  qcTitle: 'Delivery QC',
+  qcReady: 'Ready for Delivery',
+  qcBlocked: 'Blocked',
+  qcBlocker: 'Blocker',
+  qcWarning: 'Warning',
+  qcPass: 'Pass',
+  qcRefresh: 'Re-run QC',
+  qcInspectShot: 'Inspect Shot',
+  qcExpand: 'Show Findings',
+  qcCollapse: 'Hide Findings',
+  exportSrt: 'Export SRT',
+  exportVtt: 'Export WebVTT',
+  exportReviewDeckHtml: 'Export Review Deck HTML',
+  importFeedbackJson: 'Import Feedback JSON',
+  importFeedbackDone: 'Imported feedback',
+  importFeedbackSkippedLocked: 'skipped locked',
+  importFeedbackInvalid: 'invalid',
+  importFeedbackParseError: 'Invalid feedback JSON: expected an array or { items: [...] }',
 }
 
 type ViewMode = 'cards' | 'table'
@@ -404,6 +441,9 @@ export function DramaMainPage({
   const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
   const [cutOverride, setCutOverride] = useState<EpisodeCutOverrideV1 | null>(null)
   const [cutBusy, setCutBusy] = useState(false)
+  const [qcReport, setQcReport] = useState<EpisodeQcReportV1 | null>(null)
+  const [qcLoading, setQcLoading] = useState(false)
+  const [qcExpanded, setQcExpanded] = useState(true)
 
   const loadReviews = useCallback(async () => {
     const revRes = await rpc.call<{ reviews?: ShotReviewRecordV1[] }>('drama.shot.review.list', {})
@@ -511,6 +551,30 @@ export function DramaMainPage({
   useEffect(() => {
     void loadCutOverride()
   }, [loadCutOverride])
+
+  const loadQcReport = useCallback(async () => {
+    setQcLoading(true)
+    try {
+      const res = await rpc.call<{ report?: EpisodeQcReportV1 } | EpisodeQcReportV1>('drama.qc.report', {
+        ...(activeCutEpisode ? { episodeRef: activeCutEpisode } : {}),
+      })
+      if (!res.ok) return
+      const raw = 'report' in (res.data ?? {}) && (res.data as { report?: EpisodeQcReportV1 }).report
+        ? (res.data as { report: EpisodeQcReportV1 }).report
+        : (res.data as EpisodeQcReportV1 | undefined)
+      if (raw && raw.schema === 'muweave.episode-qc.v1') {
+        setQcReport(raw)
+      } else {
+        setQcReport(null)
+      }
+    } finally {
+      setQcLoading(false)
+    }
+  }, [rpc, activeCutEpisode])
+
+  useEffect(() => {
+    void loadQcReport()
+  }, [loadQcReport, reviewsByShot, cutOverride, dramaElements.length])
 
   const applyCutToRows = useCallback(
     (rows: readonly StoryboardRow[]): StoryboardRow[] => {
@@ -946,6 +1010,100 @@ export function DramaMainPage({
     }))
   }, [])
 
+  const qcStripNode = qcReport ? (
+    <section className="dr-qc-strip mw-stack" data-gap="xs" data-drama-qc-strip="true" aria-label={t('qcTitle')}>
+      <div className="dr-qc-head mw-spread">
+        <div className="mw-row" data-gap="xs">
+          <span className="mw-eyebrow">{t('qcTitle')}</span>
+          <strong className="dr-qc-score mw-num" data-qc-score={String(qcReport.score)}>
+            {qcReport.score}/100
+          </strong>
+          <StatusTag
+            status={qcReport.readyForDelivery ? 'ready' : 'blocked'}
+            lang={lang}
+            label={qcReport.readyForDelivery ? t('qcReady') : t('qcBlocked')}
+          />
+          <span className="dr-qc-counts mw-row" data-gap="xs">
+            <span className="mw-chip" data-qc-count="blocker">
+              {t('qcBlocker')} {qcReport.counts.blocker}
+            </span>
+            <span className="mw-chip" data-qc-count="warning">
+              {t('qcWarning')} {qcReport.counts.warning}
+            </span>
+            <span className="mw-chip" data-qc-count="pass">
+              {t('qcPass')} {qcReport.counts.pass}
+            </span>
+          </span>
+        </div>
+        <div className="mw-row" data-gap="xs">
+          <button
+            type="button"
+            className="mw-dsh-btn"
+            data-size="sm"
+            data-variant="ghost"
+            data-qc-refresh="true"
+            disabled={qcLoading}
+            onClick={() => void loadQcReport()}
+          >
+            {t('qcRefresh')}
+          </button>
+          {qcReport.findings.length > 0 ? (
+            <button
+              type="button"
+              className="mw-dsh-btn"
+              data-size="sm"
+              data-variant="ghost"
+              data-qc-toggle="true"
+              aria-expanded={qcExpanded}
+              onClick={() => setQcExpanded((prev) => !prev)}
+            >
+              {qcExpanded ? t('qcCollapse') : t('qcExpand')}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {qcExpanded && qcReport.findings.length > 0 ? (
+        <div className="dr-qc-findings mw-stack" data-gap="xs">
+          {qcReport.findings.map((finding, idx) => {
+            const tone = finding.severity === 'blocker' ? 'bad' : finding.severity === 'warning' ? 'warn' : 'ok'
+            if (finding.shotRef) {
+              return (
+                <button
+                  key={`${finding.code}-${finding.shotRef}-${idx}`}
+                  type="button"
+                  className="dr-qc-finding mw-row"
+                  data-gap="xs"
+                  data-severity={finding.severity}
+                  data-qc-finding-shot={finding.shotRef}
+                  title={finding.suggestion ?? finding.message}
+                  onClick={() => setSelectedShotRef(finding.shotRef!)}
+                >
+                  <ToneDot tone={tone} />
+                  <span className="mw-dsh-code">{finding.shotRef}</span>
+                  <span>{finding.message}</span>
+                  {finding.suggestion ? <span className="mw-dsh-muted">· {finding.suggestion}</span> : null}
+                </button>
+              )
+            }
+            return (
+              <div
+                key={`${finding.code}-${idx}`}
+                className="dr-qc-finding mw-row"
+                data-gap="xs"
+                data-severity={finding.severity}
+              >
+                <ToneDot tone={tone} />
+                <span>{finding.message}</span>
+                {finding.suggestion ? <span className="mw-dsh-muted">· {finding.suggestion}</span> : null}
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+    </section>
+  ) : null
+
   return (
     <WorkspaceShell
       title={t('panelTitle')}
@@ -956,6 +1114,7 @@ export function DramaMainPage({
       onSyncRequested={async () => {
         await loadAll()
         await loadCutOverride()
+        await loadQcReport()
       }}
       projectBar={
         episodes.length > 0 ? (
@@ -1054,6 +1213,8 @@ export function DramaMainPage({
               <EmptyState>{coreT('emptyElements')}</EmptyState>
             ) : (
               <div className="mw-stack" data-gap="lg">
+                {qcStripNode}
+
                 <div className="dr-readiness-strip mw-stack" data-gap="xs" data-drama-readiness-strip="true">
                   <div className="mw-spread">
                     <span className="mw-eyebrow">{t('readinessStripTitle')}</span>
@@ -1505,18 +1666,26 @@ export function DramaMainPage({
           id: 'timeline',
           label: () => t('tabTimeline'),
           render: () => (
-            <TimelineView
-              rpc={rpc}
-              editTimelines={editTimelines}
-              details={details}
-              shotRows={activeCutRows}
-              reviewsByShot={reviewsByShot}
-              episodeRef={selectedEpisode !== 'all' ? selectedEpisode : activeCutEpisode}
-              onInspectShot={setSelectedShotRef}
-              onNotice={setNotice}
-              t={t}
-              coreT={coreT}
-            />
+            <div className="mw-stack" data-gap="md">
+              {qcStripNode}
+              <TimelineView
+                rpc={rpc}
+                editTimelines={editTimelines}
+                details={details}
+                shotRows={activeCutRows}
+                reviewsByShot={reviewsByShot}
+                episodeRef={selectedEpisode !== 'all' ? selectedEpisode : activeCutEpisode}
+                qcReport={qcReport}
+                onReviewsImported={async () => {
+                  await loadReviews()
+                  await loadQcReport()
+                }}
+                onInspectShot={setSelectedShotRef}
+                onNotice={setNotice}
+                t={t}
+                coreT={coreT}
+              />
+            </div>
           ),
         },
         {
