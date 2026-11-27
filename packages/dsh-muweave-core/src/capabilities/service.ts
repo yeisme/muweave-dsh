@@ -5,6 +5,7 @@ import { addShotMediaLink, removeShotMediaLink, validateShotMediaEntry, type Cli
 import {
   CAPABILITY_RPC_ACTIONS,
   JOB_ERROR_CODES,
+  jobIsActive,
   type CapabilityCatalogV1,
   type CapabilityEstimateRequestV1,
   type CapabilityEstimateV1,
@@ -344,6 +345,30 @@ export class CapabilityService {
     await this.deps.syncWorkspace(ws).catch(() => undefined)
     this.deps.bumpGeneration()
     return { ok: true }
+  }
+
+  /** Cancel all active jobs whose requester.taskId is in taskIds. One failure does not stop others. */
+  async cancelJobsForTasks(taskIds: readonly string[]): Promise<string[]> {
+    if (!taskIds.length) return []
+    const taskIdSet = new Set(taskIds)
+    const cancelledJobIds: string[] = []
+    for (const job of this.engine.all()) {
+      if (!job.requester?.taskId || !taskIdSet.has(job.requester.taskId)) continue
+      if (!jobIsActive(job.status)) continue
+      try {
+        const updated = await this.engine.cancel(job.jobId)
+        if (updated.status === 'cancelled') {
+          cancelledJobIds.push(job.jobId)
+        }
+      } catch (err) {
+        this.deps.logger?.('capability.cascade_cancel_failed', {
+          jobRef: job.jobId,
+          taskRef: job.requester.taskId,
+          errorCode: err instanceof JobError ? err.code : 'CASCADE_CANCEL_FAILED',
+        })
+      }
+    }
+    return cancelledJobIds
   }
 
   /** Agent tools may only request; there is deliberately no agent approve path. */

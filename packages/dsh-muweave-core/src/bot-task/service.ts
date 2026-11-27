@@ -18,6 +18,7 @@ export interface BotTaskServiceDeps {
   /** Absolute path of the plugin data directory; ledgers live under it, never in .muweave/. */
   pluginDataDir: string
   logger?: BotTaskLogger
+  onTasksCancelled?: (taskIds: readonly string[]) => Promise<string[]>
 }
 
 export class BotTaskService {
@@ -28,7 +29,11 @@ export class BotTaskService {
 
   constructor(private readonly deps: BotTaskServiceDeps) {
     this.roster = new BotRoster({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
-    this.tasks = new TaskLedger({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
+    this.tasks = new TaskLedger({
+      pluginDataDir: deps.pluginDataDir,
+      logger: deps.logger,
+      onTasksCancelled: deps.onTasksCancelled,
+    })
     this.events = new EventLog({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
     this.sessions = new BotSessions({ pluginDataDir: deps.pluginDataDir, logger: deps.logger })
   }

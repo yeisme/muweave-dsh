@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import path from 'node:path'
 import { rpcFail, rpcOk } from '../protocol'
 import type { RpcEnvelope } from '../protocol'
-import type { BotTaskLogger } from './protocol'
+import type { BotTaskLogger, DelegationBudgetCeilingV1 } from './protocol'
 import { BotRoster } from './roster'
 import { EventLog } from './events'
 
@@ -26,11 +26,16 @@ export interface TaskRecordV1 {
   traceId: string
   depth: number
   deadline?: string
+  budgetCeiling?: DelegationBudgetCeilingV1
   revision: number
   createdAt: string
   updatedAt: string
 }
-export interface TaskLedgerDeps { pluginDataDir: string; logger?: BotTaskLogger }
+export interface TaskLedgerDeps {
+  pluginDataDir: string
+  logger?: BotTaskLogger
+  onTasksCancelled?: (taskIds: readonly string[]) => Promise<string[]>
+}
 interface StoredTasks { schema: typeof TASKS_SCHEMA; tasks: TaskRecordV1[] }
 interface RosterBot {
   botId: string
@@ -80,12 +85,32 @@ function attention(status: TaskStatus): TaskAttention {
   if (status === 'waiting_for_human') return 'waiting_for_human'
   return 'none'
 }
+function parseBudgetCeiling(value: unknown): DelegationBudgetCeilingV1 | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new LedgerError('muweave/invalid_payload', 'budgetCeiling must be an object with unit and amount')
+  }
+  const raw = value as Record<string, unknown>
+  if (raw.unit !== 'usd' && raw.unit !== 'credits') {
+    throw new LedgerError('muweave/invalid_payload', 'budgetCeiling.unit must be usd or credits')
+  }
+  if (typeof raw.amount !== 'number' || !Number.isFinite(raw.amount) || raw.amount < 0) {
+    throw new LedgerError('muweave/invalid_payload', 'budgetCeiling.amount must be a non-negative finite number')
+  }
+  return { unit: raw.unit, amount: raw.amount }
+}
 function valid(raw: unknown): TaskRecordV1 | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const r = raw as Partial<TaskRecordV1>
   if (typeof r.taskId !== 'string' || typeof r.workspaceId !== 'string' || typeof r.rootTaskId !== 'string' || typeof r.goal !== 'string' || typeof r.idempotencyKey !== 'string' || typeof r.payloadDigest !== 'string' || typeof r.traceId !== 'string' || typeof r.depth !== 'number' || !Number.isInteger(r.depth) || r.depth < 0 || r.depth > 2 || typeof r.revision !== 'number' || !Number.isInteger(r.revision) || r.revision < 0 || typeof r.createdAt !== 'string' || typeof r.updatedAt !== 'string' || !STATUSES.has(r.status as TaskStatus)) return undefined
   const status = r.status as TaskStatus
-  return { taskId: r.taskId, workspaceId: r.workspaceId, ...(typeof r.parentTaskRef === 'string' ? { parentTaskRef: r.parentTaskRef } : {}), rootTaskId: r.rootTaskId, ...(r.assignedBy && typeof r.assignedBy === 'object' ? { assignedBy: r.assignedBy as TaskBotRef } : {}), ...(r.assignedTo && typeof r.assignedTo === 'object' ? { assignedTo: r.assignedTo as TaskBotRef } : {}), goal: redact(r.goal), status, attention: attention(status), idempotencyKey: r.idempotencyKey, payloadDigest: r.payloadDigest, traceId: r.traceId, depth: r.depth, ...(typeof r.deadline === 'string' ? { deadline: r.deadline } : {}), revision: r.revision, createdAt: r.createdAt, updatedAt: r.updatedAt }
+  let budgetCeiling: DelegationBudgetCeilingV1 | undefined
+  try {
+    budgetCeiling = parseBudgetCeiling(r.budgetCeiling)
+  } catch {
+    budgetCeiling = undefined
+  }
+  return { taskId: r.taskId, workspaceId: r.workspaceId, ...(typeof r.parentTaskRef === 'string' ? { parentTaskRef: r.parentTaskRef } : {}), rootTaskId: r.rootTaskId, ...(r.assignedBy && typeof r.assignedBy === 'object' ? { assignedBy: r.assignedBy as TaskBotRef } : {}), ...(r.assignedTo && typeof r.assignedTo === 'object' ? { assignedTo: r.assignedTo as TaskBotRef } : {}), goal: redact(r.goal), status, attention: attention(status), idempotencyKey: r.idempotencyKey, payloadDigest: r.payloadDigest, traceId: r.traceId, depth: r.depth, ...(typeof r.deadline === 'string' ? { deadline: r.deadline } : {}), ...(budgetCeiling ? { budgetCeiling } : {}), revision: r.revision, createdAt: r.createdAt, updatedAt: r.updatedAt }
 }
 
 export class TaskLedger {
@@ -147,12 +172,13 @@ export class TaskLedger {
     if (parent && this.children(parent.taskId).length >= 4) throw new LedgerError('BOT_FANOUT_EXCEEDED', 'A task cannot have more than 4 child tasks')
     const traceId = optional(payload.traceId, 'traceId') || 'trace_' + randomUUID().replaceAll('-', '')
     const deadline = optional(payload.deadline, 'deadline', 80)
-    const payloadDigest = digest({ workspaceId, parentTaskRef: parentTaskRef || null, assignedBy: assignedBy || null, assignedTo: assignedTo || null, goal, traceId, depth, deadline: deadline || null })
+    const budgetCeiling = parseBudgetCeiling(payload.budgetCeiling)
+    const payloadDigest = digest({ workspaceId, parentTaskRef: parentTaskRef || null, assignedBy: assignedBy || null, assignedTo: assignedTo || null, goal, traceId, depth, deadline: deadline || null, ...(budgetCeiling ? { budgetCeiling } : {}) })
     const prior = this.idempotency.get(this.key(workspaceId, idempotencyKey))
     if (prior) { if (prior.payloadDigest !== payloadDigest) throw new LedgerError('TASK_IDEMPOTENCY_CONFLICT', 'Same idempotencyKey was used for a different task'); return { task: prior } }
     const now = new Date().toISOString()
     const status: TaskStatus = assignedTo ? 'assigned' : 'proposed'
-    const task: TaskRecordV1 = { taskId: 'task_' + randomUUID().replaceAll('-', '').slice(0, 20), workspaceId, ...(parentTaskRef ? { parentTaskRef } : {}), rootTaskId: '', ...(assignedBy ? { assignedBy } : {}), ...(assignedTo ? { assignedTo } : {}), goal, status, attention: attention(status), idempotencyKey, payloadDigest, traceId, depth, ...(deadline ? { deadline } : {}), revision: 0, createdAt: now, updatedAt: now }
+    const task: TaskRecordV1 = { taskId: 'task_' + randomUUID().replaceAll('-', '').slice(0, 20), workspaceId, ...(parentTaskRef ? { parentTaskRef } : {}), rootTaskId: '', ...(assignedBy ? { assignedBy } : {}), ...(assignedTo ? { assignedTo } : {}), goal, status, attention: attention(status), idempotencyKey, payloadDigest, traceId, depth, ...(deadline ? { deadline } : {}), ...(budgetCeiling ? { budgetCeiling } : {}), revision: 0, createdAt: now, updatedAt: now }
     task.rootTaskId = parent?.rootTaskId || task.taskId
     this.tasks.set(task.taskId, task); this.idempotency.set(this.key(workspaceId, idempotencyKey), task); this.persist()
     this.log('bot_task.created', { taskRef: task.taskId, workspaceId: task.workspaceId, traceId: task.traceId, depth: task.depth })
@@ -207,15 +233,34 @@ export class TaskLedger {
     })
     return result
   }
-  private list(payload: Record<string, unknown>): { tasks: TaskRecordV1[] } {
+  private list(payload: Record<string, unknown>): { tasks: TaskRecordV1[]; orphanedCount: number } {
     const workspaceId = optional(payload.workspaceId, 'workspaceId'); const rootTaskId = optional(payload.rootTaskId, 'rootTaskId'); const botId = optional(payload.botId, 'botId'); const status = payload.status === undefined ? undefined : required(payload.status, 'status')
     if (status && !STATUSES.has(status as TaskStatus)) throw new LedgerError('muweave/invalid_payload', 'Unknown task status')
-    return { tasks: [...this.tasks.values()].filter((task) => !workspaceId || task.workspaceId === workspaceId).filter((task) => !rootTaskId || task.rootTaskId === rootTaskId).filter((task) => !botId || task.assignedBy?.botId === botId || task.assignedTo?.botId === botId).filter((task) => !status || task.status === status).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }
+    const inWorkspace = [...this.tasks.values()].filter((task) => !workspaceId || task.workspaceId === workspaceId)
+    const orphanedCount = inWorkspace.filter((task) => task.status === 'orphaned').length
+    return {
+      tasks: inWorkspace
+        .filter((task) => !rootTaskId || task.rootTaskId === rootTaskId)
+        .filter((task) => !botId || task.assignedBy?.botId === botId || task.assignedTo?.botId === botId)
+        .filter((task) => !status || task.status === status)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      orphanedCount,
+    }
   }
-  private cancel(payload: Record<string, unknown>): { task: TaskRecordV1; cancelledTaskIds: string[] } {
+  private async cancel(payload: Record<string, unknown>): Promise<{ task: TaskRecordV1; cancelledTaskIds: string[]; cancelledJobIds: string[] }> {
     const root = this.get(payload.taskId); const queue = [root.taskId]; const cancelledTaskIds: string[] = []; const now = new Date().toISOString()
     while (queue.length) { const id = queue.shift() as string; const task = this.tasks.get(id); if (!task) continue; queue.push(...this.children(id).map((child) => child.taskId)); if (TERMINAL.has(task.status)) continue; task.status = 'cancelled'; task.attention = attention(task.status); task.revision += 1; task.updatedAt = now; cancelledTaskIds.push(id) }
-    if (cancelledTaskIds.length) this.persist(); this.log('bot_task.cancelled', { taskRef: root.taskId, count: cancelledTaskIds.length }); return { task: root, cancelledTaskIds }
+    if (cancelledTaskIds.length) this.persist()
+    let cancelledJobIds: string[] = []
+    if (cancelledTaskIds.length && this.deps.onTasksCancelled) {
+      try {
+        cancelledJobIds = await this.deps.onTasksCancelled(cancelledTaskIds)
+      } catch {
+        this.log('bot_task.cancel_jobs_failed', { taskRef: root.taskId })
+      }
+    }
+    this.log('bot_task.cancelled', { taskRef: root.taskId, count: cancelledTaskIds.length, cancelledJobs: cancelledJobIds.length })
+    return { task: root, cancelledTaskIds, cancelledJobIds }
   }
   private trace(payload: Record<string, unknown>): Record<string, unknown> {
     const task = this.get(payload.taskId); const jobs: unknown[] = []; const jobsFile = path.join(this.deps.pluginDataDir, 'jobs.v1.json')
@@ -223,6 +268,6 @@ export class TaskLedger {
     // TODO: connect EventLog once its append/list contract is available. Do not read events.v1.jsonl here.
     return { task: { taskId: task.taskId, workspaceId: task.workspaceId, ...(task.parentTaskRef ? { parentTaskRef: task.parentTaskRef } : {}), rootTaskId: task.rootTaskId, status: task.status, attention: task.attention, payloadDigest: task.payloadDigest, traceId: task.traceId, depth: task.depth, revision: task.revision, createdAt: task.createdAt, updatedAt: task.updatedAt }, jobs, events: [] }
   }
-  async handle(action: string, payload: Record<string, unknown>, generation = 0): Promise<RpcEnvelope<unknown>> { if (this.disposed) return rpcFail(generation, 'muweave/disposed', 'Task ledger is disposed'); try { switch (action) { case 'task.create': return rpcOk(generation, this.create(payload)); case 'task.delegate': return rpcOk(generation, await this.delegate(payload)); case 'task.list': return rpcOk(generation, this.list(payload)); case 'task.get': return rpcOk(generation, { task: this.get(payload.taskId) }); case 'task.cancel': return rpcOk(generation, this.cancel(payload)); case 'task.trace': return rpcOk(generation, this.trace(payload)); default: return rpcFail(generation, 'muweave/unknown_action', action + ' is not a task action') } } catch (error) { if (error instanceof LedgerError) return rpcFail(generation, error.code, error.message); this.log('bot_task.tasks_failed', { action, errorCode: 'TASK_LEDGER_FAILURE' }); return rpcFail(generation, 'muweave/internal_error', 'Task ledger operation failed') } }
+  async handle(action: string, payload: Record<string, unknown>, generation = 0): Promise<RpcEnvelope<unknown>> { if (this.disposed) return rpcFail(generation, 'muweave/disposed', 'Task ledger is disposed'); try { switch (action) { case 'task.create': return rpcOk(generation, this.create(payload)); case 'task.delegate': return rpcOk(generation, await this.delegate(payload)); case 'task.list': return rpcOk(generation, this.list(payload)); case 'task.get': return rpcOk(generation, { task: this.get(payload.taskId) }); case 'task.cancel': return rpcOk(generation, await this.cancel(payload)); case 'task.trace': return rpcOk(generation, this.trace(payload)); default: return rpcFail(generation, 'muweave/unknown_action', action + ' is not a task action') } } catch (error) { if (error instanceof LedgerError) return rpcFail(generation, error.code, error.message); this.log('bot_task.tasks_failed', { action, errorCode: 'TASK_LEDGER_FAILURE' }); return rpcFail(generation, 'muweave/internal_error', 'Task ledger operation failed') } }
   dispose(): void { this.disposed = true }
 }

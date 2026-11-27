@@ -10,6 +10,11 @@ export const BOT_RPC_ACTIONS = ['bot.roster', 'bot.get', 'bot.pause', 'bot.sessi
 export const TASK_RPC_ACTIONS = ['task.create', 'task.delegate', 'task.list', 'task.get', 'task.cancel', 'task.trace'] as const
 export const EVENT_RPC_ACTIONS = ['event.list'] as const
 
+export interface DelegationBudgetCeilingV1 {
+  unit: 'usd' | 'credits'
+  amount: number
+}
+
 export interface DelegationRuleV1 {
   fromBotId: string
   toBotId: string
@@ -18,6 +23,7 @@ export interface DelegationRuleV1 {
   maxDepth: number
   maxChildren: number
   requiresUserApproval: boolean
+  budgetCeiling?: DelegationBudgetCeilingV1
 }
 
 export const BOT_TASK_RPC_ACTIONS = [

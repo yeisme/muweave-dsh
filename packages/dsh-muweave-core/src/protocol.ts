@@ -155,6 +155,11 @@ export const RPC_ACTIONS = [
   'project.diagnose',
   'project.activate',
   'project.clone',
+  'project.migration.report',
+  'drama.shot.review.list',
+  'drama.shot.review.set',
+  'drama.shot.review.batch',
+  'drama.export.manifest',
 ] as const
 
 export type MuweaveRpcAction =
@@ -395,6 +400,88 @@ export interface ScheduleBoardV1 {
   schema: 'muweave.schedule.v1'
   entries: ScheduleEntryViewV1[]
   updatedAt: string
+}
+
+export type ShotReviewStatus = 'draft' | 'in_review' | 'needs_revision' | 'approved' | 'locked'
+
+export interface ShotReviewRecordV1 {
+  workspaceId: string
+  shotRef: string
+  sceneRef?: string
+  episodeRef?: string
+  status: ShotReviewStatus
+  note?: string
+  tags: string[]
+  revision: number
+  updatedAt: string
+}
+
+export interface ShotReviewSetInputV1 {
+  workspaceId?: string
+  shotRef: string
+  sceneRef?: string
+  episodeRef?: string
+  status: ShotReviewStatus
+  note?: string
+  tags?: string[]
+  expectedRevision?: number
+}
+
+export type DramaExportFormat = 'cut_manifest_v1' | 'cmx3600_edl' | 'shotlist_csv'
+
+export interface DramaExportResultV1 {
+  schema: 'muweave.drama-export.v1'
+  format: DramaExportFormat
+  filename: string
+  mimeType: 'application/json' | 'text/plain' | 'text/csv'
+  shotCount: number
+  totalDurationMs: number
+  fps: number
+  aspectRatio: string
+  content: string
+  generatedAt: string
+}
+
+export interface ProjectMigrationCheckV1 {
+  id: string
+  label: string
+  status: 'pass' | 'warn' | 'fail'
+  detail: string
+}
+
+export interface ProjectMigrationReportV1 {
+  schema: 'muweave.migration-report.v1'
+  registrySchema: string
+  projectCount: number
+  archivedCount: number
+  corruptBackupCount: number
+  /** Sanitized basenames only (never absolute host paths). */
+  corruptBackups: string[]
+  legacyScheduleCount: number
+  unclaimedBundleCount: number
+  readyForV2: boolean
+  checks: ProjectMigrationCheckV1[]
+  generatedAt: string
+}
+
+export interface ShotReviewBatchInputV1 {
+  workspaceId?: string
+  items: ShotReviewSetInputV1[]
+}
+
+export interface ShotReviewBatchItemResultV1 {
+  shotRef: string
+  ok: boolean
+  record?: ShotReviewRecordV1
+  errorCode?: string
+  message?: string
+  currentRevision?: number
+}
+
+export interface ShotReviewBatchResultV1 {
+  results: ShotReviewBatchItemResultV1[]
+  succeededCount: number
+  failedCount: number
 }
 
 export type {

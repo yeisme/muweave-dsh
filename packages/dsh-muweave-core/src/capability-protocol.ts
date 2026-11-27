@@ -230,6 +230,11 @@ export interface BudgetStatusV1 {
   day: string
   lines: BudgetLineV1[]
   unknownCostJobs: number
+  /** Backward-compatible cross-day rollups (last 7 local days inclusive of today, and all-time). */
+  windowSummaries?: {
+    last7Days: BudgetLineV1[]
+    allTime: BudgetLineV1[]
+  }
 }
 
 export const JOB_ERROR_CODES = [

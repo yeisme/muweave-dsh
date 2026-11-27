@@ -48,6 +48,13 @@ import { CapabilityService } from './capabilities/service'
 import { BotTaskService } from './bot-task/service'
 import { ScheduleInputError, ScheduleStore } from './schedule-store'
 import { ProjectInputError, ProjectStore } from './project-store'
+import { DramaReviewInputError, DramaReviewStore, isValidShotReviewStatus } from './drama-review-store'
+import {
+  buildDramaExportPackage,
+  DramaExportInputError,
+  type DramaExportShotInput,
+  type DramaExportShotMediaInput,
+} from './drama-export'
 import type { JobRecordV1 } from './capability-protocol'
 
 export interface DshRequestLike {
@@ -166,6 +173,34 @@ export const BUILTIN_CREATOR_TEMPLATES: readonly TemplateCatalogEntryV1[] = [
       { name: 'episode_scene_ref', label: '目标集场引用 (如 episode:01 / scene:01)', inputType: 'text', required: true },
       { name: 'target_duration_sec', label: '目标总时长（秒）', inputType: 'enum', required: true, options: ['45', '60', '90'] },
       { name: 'pacing_mode', label: '剪辑节奏档位', inputType: 'enum', required: true, options: ['高频快切反转', '情绪张力递进', '悬疑压迫留白'] },
+    ],
+  },
+  {
+    templateRef: 'promptrepo://official/audio/drama-ambient-sfx-v1@1.0.0?locale=zh',
+    releaseId: 'rel_drama_ambient_sfx_v1',
+    title: '声景氛围与关键动作音效配方 (Sonora)',
+    category: 'drama',
+    version: '1.0.0',
+    digest: sha256Digest('drama-ambient-sfx-v1@1.0.0'),
+    summary: '为竖屏短剧单镜或转场生成可落地的环境底噪、拟音与情绪重音提示词，直通 Sonora 音效槽位。',
+    slots: [
+      { name: 'scene_space', label: '空间环境与天气声场', inputType: 'text', required: true },
+      { name: 'foley_action', label: '关键动作拟音与节拍点', inputType: 'textarea', required: true },
+      { name: 'mood_layer', label: '情绪氛围层次', inputType: 'enum', required: true, options: ['雨夜霓虹压迫感', '日常轻快节奏', '反转骤停冲击'] },
+    ],
+  },
+  {
+    templateRef: 'promptrepo://official/video/cinematic-camera-motion-v1@1.0.0?locale=zh',
+    releaseId: 'rel_cinematic_camera_motion_v1',
+    title: '电影级运镜与情绪特写提示词卡',
+    category: 'drama',
+    version: '1.0.0',
+    digest: sha256Digest('cinematic-camera-motion-v1@1.0.0'),
+    summary: '将镜头景别、推拉摇移轨迹与人物微表情光影编排为电影感短剧分镜提示词。',
+    slots: [
+      { name: 'shot_subject', label: '画面主体与情绪微表情', inputType: 'text', required: true },
+      { name: 'camera_move', label: '运镜轨迹与焦段节奏', inputType: 'enum', required: true, options: ['缓推至眼神特写', '环绕跟拍揭示环境', '低角度仰拍定格反转'] },
+      { name: 'lighting_cue', label: '光线质感与色彩对比', inputType: 'textarea', required: false },
     ],
   },
 ]
@@ -330,6 +365,8 @@ export class CreatorHostService {
   private readonly schedule: ScheduleStore
   /** Project registry: identity + user intent only; element truth stays in .muweave/. */
   private readonly projects: ProjectStore
+  /** Director shot-review persistence; never touches canonical owner databases. */
+  private readonly dramaReviews: DramaReviewStore
 
   constructor(options: CreatorHostServiceOptions = {}) {
     this.runner = options.runner ?? defaultCliRunner
@@ -345,6 +382,7 @@ export class CreatorHostService {
     this.defaultWorkspaceId = this.registerWorkspaceInternal(initialWs).workspaceId
     this.schedule = new ScheduleStore(path.join(this.pluginDataDir, 'schedule.v1.json'))
     this.projects = new ProjectStore(path.join(this.pluginDataDir, 'projects.v1.json'))
+    this.dramaReviews = new DramaReviewStore(path.join(this.pluginDataDir, 'drama-reviews.v1.json'))
     this.restorePersistedLedgerSync()
     this.capabilities = new CapabilityService({
       pluginDataDir: this.pluginDataDir,
@@ -361,6 +399,7 @@ export class CreatorHostService {
     this.botTask = new BotTaskService({
       pluginDataDir: this.pluginDataDir,
       logger: (event, fields) => this.logger?.('muweave').info({ event, hostInstanceId: this.hostInstanceId, ...fields }),
+      onTasksCancelled: (ids) => this.capabilities.cancelJobsForTasks(ids),
     })
   }
 
@@ -697,6 +736,15 @@ export class CreatorHostService {
           retryable: false,
           ...(err.details ? { details: err.details } : {}),
         }), this.hostInstanceId)
+      }
+      if (err instanceof DramaReviewInputError) {
+        return stampHost(rpcFail(this.generation, err.code, err.message, {
+          retryable: false,
+          ...(err.details ? { details: err.details } : {}),
+        }), this.hostInstanceId)
+      }
+      if (err instanceof DramaExportInputError) {
+        return stampHost(rpcFail(this.generation, err.code, err.message, { retryable: false }), this.hostInstanceId)
       }
       throw err
     }
@@ -1212,8 +1260,168 @@ export class CreatorHostService {
         return rpcOk(this.generation, board)
       }
 
+      case 'drama.shot.review.list': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const sceneRef = typeof payload.sceneRef === 'string' && payload.sceneRef.trim() ? payload.sceneRef.trim() : undefined
+        if (payload.status !== undefined) {
+          if (!isValidShotReviewStatus(payload.status)) {
+            return rpcFail(this.generation, 'muweave/invalid_review_input', 'Invalid shot review status', { retryable: false })
+          }
+          return rpcOk(this.generation, this.dramaReviews.list({ workspaceId: ws.id, ...(sceneRef ? { sceneRef } : {}), status: payload.status }))
+        }
+        return rpcOk(this.generation, this.dramaReviews.list({ workspaceId: ws.id, ...(sceneRef ? { sceneRef } : {}) }))
+      }
+
+      case 'drama.shot.review.set': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        try {
+          const review = this.dramaReviews.set(ws.id, {
+            shotRef: typeof payload.shotRef === 'string' ? payload.shotRef : '',
+            sceneRef: typeof payload.sceneRef === 'string' ? payload.sceneRef : undefined,
+            episodeRef: typeof payload.episodeRef === 'string' ? payload.episodeRef : undefined,
+            status: payload.status as never,
+            note: payload.note as never,
+            tags: payload.tags as never,
+            expectedRevision: payload.expectedRevision as never,
+          })
+          this.bumpGeneration()
+          return rpcOk(this.generation, { review })
+        } catch (err) {
+          if (err instanceof DramaReviewInputError) {
+            return rpcFail(this.generation, err.code, err.message, {
+              retryable: false,
+              ...(err.details ? { details: err.details } : {}),
+            })
+          }
+          throw err
+        }
+      }
+
+      case 'drama.shot.review.batch': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        try {
+          const result = this.dramaReviews.setBatch(ws.id, payload.items as never)
+          if (result.succeededCount > 0) this.bumpGeneration()
+          return rpcOk(this.generation, result)
+        } catch (err) {
+          if (err instanceof DramaReviewInputError) {
+            return rpcFail(this.generation, err.code, err.message, {
+              retryable: false,
+              ...(err.details ? { details: err.details } : {}),
+            })
+          }
+          throw err
+        }
+      }
+
+      case 'drama.export.manifest': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const manifest = await readBundleManifestFromDisk(ws.dir)
+        const index = await readBundleIndexFromDisk(ws.dir)
+        const storyboards = index.elements.filter((el) => el.kind === 'drama.storyboard_table')
+        const timelines = index.elements.filter((el) => el.kind === 'drama.edit_timeline')
+
+        let timelineFps: number | undefined
+        let timelineAspectRatio: string | undefined
+        const clipBounds = new Map<string, { inMs: number; outMs: number }>()
+        for (const tlSummary of timelines) {
+          const tlEl = await readElementFromDisk(ws.dir, tlSummary.elementId)
+          const tlPayload = (tlEl.payload ?? {}) as {
+            fps?: unknown
+            aspectRatio?: unknown
+            clips?: Array<{ clip_ref?: unknown; shot_ref?: unknown; in_ms?: unknown; out_ms?: unknown }>
+          }
+          if (typeof tlPayload.fps === 'number' && timelineFps === undefined) timelineFps = tlPayload.fps
+          if (typeof tlPayload.aspectRatio === 'string' && !timelineAspectRatio) timelineAspectRatio = tlPayload.aspectRatio
+          for (const clip of tlPayload.clips ?? []) {
+            const ref = typeof clip.shot_ref === 'string' ? clip.shot_ref : typeof clip.clip_ref === 'string' ? clip.clip_ref : undefined
+            if (ref && typeof clip.in_ms === 'number' && typeof clip.out_ms === 'number') {
+              clipBounds.set(ref, { inMs: clip.in_ms, outMs: clip.out_ms })
+            }
+          }
+        }
+
+        const manifestMediaByShot = new Map<string, DramaExportShotMediaInput[]>()
+        for (const entry of manifest.bindings.shotMedia ?? []) {
+          const list = manifestMediaByShot.get(entry.shotRef) ?? []
+          list.push({
+            role: entry.role,
+            ...(entry.sha256 ? { sha256: entry.sha256 } : {}),
+            ...(entry.elementId ? { elementId: entry.elementId } : {}),
+            ...(entry.mime ? { mime: entry.mime } : {}),
+          })
+          manifestMediaByShot.set(entry.shotRef, list)
+        }
+
+        const shots: DramaExportShotInput[] = []
+        for (const sbSummary of storyboards) {
+          const sbEl = await readElementFromDisk(ws.dir, sbSummary.elementId)
+          const sbPayload = (sbEl.payload ?? {}) as {
+            rows?: Array<{
+              sceneRef?: string
+              shotRef?: string
+              order?: number
+              plannedDurationMicros?: number
+              linkedMedia?: DramaExportShotMediaInput[]
+            }>
+          }
+          for (const row of sbPayload.rows ?? []) {
+            if (!row.shotRef) continue
+            const bounds = clipBounds.get(row.shotRef)
+            const combinedMedia: DramaExportShotMediaInput[] = [
+              ...(Array.isArray(row.linkedMedia) ? row.linkedMedia : []),
+              ...(manifestMediaByShot.get(row.shotRef) ?? []),
+            ]
+            shots.push({
+              order: typeof row.order === 'number' ? row.order : shots.length + 1,
+              sceneRef: row.sceneRef ?? '',
+              shotRef: row.shotRef,
+              ...(sbSummary.episodeRef ? { episodeRef: sbSummary.episodeRef } : {}),
+              plannedDurationMicros: typeof row.plannedDurationMicros === 'number' ? row.plannedDurationMicros : 0,
+              ...(bounds ? { inMs: bounds.inMs, outMs: bounds.outMs } : {}),
+              ...(combinedMedia.length ? { linkedMedia: combinedMedia } : {}),
+            })
+          }
+        }
+
+        const reviews = this.dramaReviews.list({ workspaceId: ws.id }).reviews
+        try {
+          const result = buildDramaExportPackage({
+            format: (payload.format ?? 'cut_manifest_v1') as never,
+            projectId: index.projectId,
+            title: index.title,
+            fps: typeof payload.fps === 'number' ? payload.fps : timelineFps,
+            aspectRatio: typeof payload.aspectRatio === 'string' ? payload.aspectRatio : timelineAspectRatio,
+            shots,
+            reviews,
+          })
+          return rpcOk(this.generation, result)
+        } catch (err) {
+          if (err instanceof DramaExportInputError) {
+            return rpcFail(this.generation, err.code, err.message, { retryable: false })
+          }
+          throw err
+        }
+      }
+
       case 'project.list': {
         return rpcOk(this.generation, this.projects.list(payload.includeArchived === true))
+      }
+
+      case 'project.migration.report': {
+        const legacyScheduleCount = this.schedule.list().entries.filter((entry) => entry.legacy === true).length
+        const claimedWorkspaces = new Set<string>()
+        for (const project of this.projects.list(false).projects) {
+          for (const wsId of project.workspaceRefs) claimedWorkspaces.add(wsId)
+        }
+        let unclaimedBundleCount = 0
+        for (const ws of this.workspaces.values()) {
+          if (claimedWorkspaces.has(ws.id)) continue
+          if (existsSync(path.join(muweaveRoot(ws.dir), 'bundle.v1.json'))) {
+            unclaimedBundleCount += 1
+          }
+        }
+        return rpcOk(this.generation, this.projects.migrationReport({ legacyScheduleCount, unclaimedBundleCount }))
       }
 
       case 'project.diagnose': {

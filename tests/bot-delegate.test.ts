@@ -104,4 +104,32 @@ describe('task.delegate', () => {
     const events = await new EventLog({ pluginDataDir: (ledger as any).deps.pluginDataDir }).handle('event.list', { taskId: (first as any).data.task.taskId })
     expect((events as any).data.events).toEqual([expect.objectContaining({ event: 'task.delegated' })])
   })
+
+  it('validates and persists optional budgetCeiling on task.delegate', async () => {
+    const ledger = await makeLedger()
+    const okRes = await delegate(ledger, {
+      idempotencyKey: 'delegate-budget-ok',
+      budgetCeiling: { unit: 'usd', amount: 2.5 },
+    })
+    expect(okRes.ok).toBe(true)
+    expect((okRes as any).data.task.budgetCeiling).toEqual({ unit: 'usd', amount: 2.5 })
+
+    // Reload from disk preserves budgetCeiling.
+    const reloaded = new TaskLedger({ pluginDataDir: (ledger as any).deps.pluginDataDir })
+    const fetched = await reloaded.handle('task.get', { taskId: (okRes as any).data.task.taskId })
+    expect((fetched as any).data.task.budgetCeiling).toEqual({ unit: 'usd', amount: 2.5 })
+
+    // Reject negative amount or unknown unit.
+    const negRes = await delegate(ledger, {
+      idempotencyKey: 'delegate-budget-neg',
+      budgetCeiling: { unit: 'usd', amount: -1 },
+    })
+    expect(errorCode(negRes)).toBe('muweave/invalid_payload')
+
+    const badUnitRes = await delegate(ledger, {
+      idempotencyKey: 'delegate-budget-unit',
+      budgetCeiling: { unit: 'eur', amount: 5 },
+    })
+    expect(errorCode(badUnitRes)).toBe('muweave/invalid_payload')
+  })
 })

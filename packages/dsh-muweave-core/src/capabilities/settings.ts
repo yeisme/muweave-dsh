@@ -27,13 +27,21 @@ export function localDay(date: Date = new Date()): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-/** committed = approved ceilings of every job that reached the owner without a reported cost; spent = reported actual cost, both for today. */
-export function computeBudget(jobs: readonly JobRecordV1[], settings: ReturnType<typeof readSettings>, now: Date = new Date()): BudgetStatusV1 {
-  const day = localDay(now)
-  const totals = new Map<CostUnit, { committed: number; spent: number }>([['usd', { committed: 0, spent: 0 }], ['credits', { committed: 0, spent: 0 }]])
+function aggregateWindow(
+  jobs: readonly JobRecordV1[],
+  settings: ReturnType<typeof readSettings>,
+  includeCap: boolean,
+  predicate: (approvedDate: Date) => boolean,
+): { lines: BudgetLineV1[]; unknownCostJobs: number } {
+  const totals = new Map<CostUnit, { committed: number; spent: number }>([
+    ['usd', { committed: 0, spent: 0 }],
+    ['credits', { committed: 0, spent: 0 }],
+  ])
   let unknownCostJobs = 0
   for (const job of jobs) {
-    if (!job.approvedAt || localDay(new Date(job.approvedAt)) !== day) continue
+    if (!job.approvedAt) continue
+    const approvedDate = new Date(job.approvedAt)
+    if (Number.isNaN(approvedDate.getTime()) || !predicate(approvedDate)) continue
     // A definite submit rejection never got an owner run id, so nothing could have been billed.
     if (job.status === 'failed' && job.errorCode === 'OWNER_SUBMIT_FAILED' && !job.ownerJobRef) continue
     const unit = job.actualCost?.unit ?? job.approvedCeiling?.unit
@@ -49,8 +57,33 @@ export function computeBudget(jobs: readonly JobRecordV1[], settings: ReturnType
   }
   const lines: BudgetLineV1[] = []
   for (const [unit, t] of totals) {
-    const cap = unit === 'usd' ? settings.dailyCap?.usd : settings.dailyCap?.credits
-    if (unit === 'usd' || t.committed || t.spent || cap !== undefined) lines.push({ unit, ...t, ...(cap === undefined ? {} : { dailyCap: cap }) })
+    const cap = includeCap ? (unit === 'usd' ? settings.dailyCap?.usd : settings.dailyCap?.credits) : undefined
+    if (unit === 'usd' || t.committed || t.spent || cap !== undefined) {
+      lines.push({ unit, ...t, ...(cap === undefined ? {} : { dailyCap: cap }) })
+    }
   }
-  return { paidEnabled: settings.paidEnabled, day, lines, unknownCostJobs }
+  return { lines, unknownCostJobs }
+}
+
+/** committed = approved ceilings of every job that reached the owner without a reported cost; spent = reported actual cost, both for today. */
+export function computeBudget(jobs: readonly JobRecordV1[], settings: ReturnType<typeof readSettings>, now: Date = new Date()): BudgetStatusV1 {
+  const day = localDay(now)
+  const last7DaysSet = new Set<string>()
+  for (let offset = 0; offset < 7; offset += 1) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset)
+    last7DaysSet.add(localDay(d))
+  }
+  const today = aggregateWindow(jobs, settings, true, (d) => localDay(d) === day)
+  const last7 = aggregateWindow(jobs, settings, false, (d) => last7DaysSet.has(localDay(d)))
+  const allTime = aggregateWindow(jobs, settings, false, () => true)
+  return {
+    paidEnabled: settings.paidEnabled,
+    day,
+    lines: today.lines,
+    unknownCostJobs: today.unknownCostJobs,
+    windowSummaries: {
+      last7Days: last7.lines,
+      allTime: allTime.lines,
+    },
+  }
 }

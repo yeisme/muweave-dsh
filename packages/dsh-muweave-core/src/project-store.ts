@@ -1,12 +1,15 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import type {
+  ProjectMigrationCheckV1,
+  ProjectMigrationReportV1,
   ProjectOwnerBindingV1,
   ProjectRecordV1,
   ProjectStatus,
@@ -614,6 +617,109 @@ export class ProjectStore {
     this.activeProjectId = projectId;
     this.persist();
     return project;
+  }
+
+  /**
+   * Read-only v1 -> v2 registry migration report. Never persists and never leaks host paths.
+   */
+  migrationReport(context?: {
+    legacyScheduleCount?: number;
+    unclaimedBundleCount?: number;
+  }): ProjectMigrationReportV1 {
+    const dir = path.dirname(this.file);
+    const corruptBackups: string[] = [];
+    if (existsSync(dir)) {
+      try {
+        for (const name of readdirSync(dir)) {
+          if (/^projects\.v1\.corrupt-\d+\.json$/.test(name)) {
+            corruptBackups.push(name);
+          }
+        }
+      } catch {
+        /* best effort */
+      }
+    }
+    corruptBackups.sort((a, b) => b.localeCompare(a));
+
+    const projectCount = this.projects.length;
+    const archivedCount = this.projects.filter((p) => p.archived).length;
+    const corruptBackupCount = corruptBackups.length;
+    const legacyScheduleCount = Math.max(0, context?.legacyScheduleCount ?? 0);
+    const unclaimedBundleCount = Math.max(0, context?.unclaimedBundleCount ?? 0);
+    const conflictBindingCount = this.projects.reduce(
+      (sum, p) =>
+        sum +
+        p.ownerBindings.filter(
+          (b) => b.bindingState === "conflict" || b.bindingState === "unavailable",
+        ).length,
+      0,
+    );
+
+    const checks: ProjectMigrationCheckV1[] = [
+      {
+        id: "registry_schema",
+        label: "Registry schema version",
+        status: "pass",
+        detail: `Registry uses ${PROJECTS_SCHEMA} (${projectCount} project(s), ${archivedCount} archived).`,
+      },
+      {
+        id: "corrupt_backups",
+        label: "Corrupt registry backups",
+        status: corruptBackupCount === 0 && !this.corruptFile ? "pass" : "warn",
+        detail:
+          corruptBackupCount === 0 && !this.corruptFile
+            ? "No isolated corrupt registry backups detected."
+            : `${corruptBackupCount} corrupt backup file(s) found in plugin data directory.`,
+      },
+      {
+        id: "legacy_schedule",
+        label: "Legacy schedule ownership",
+        status: legacyScheduleCount === 0 ? "pass" : "warn",
+        detail:
+          legacyScheduleCount === 0
+            ? "All schedule entries have explicit project ownership."
+            : `${legacyScheduleCount} legacy schedule entry(s) lack projectId ownership.`,
+      },
+      {
+        id: "unclaimed_bundles",
+        label: "Unclaimed workspace bundles",
+        status: unclaimedBundleCount === 0 ? "pass" : "warn",
+        detail:
+          unclaimedBundleCount === 0
+            ? "All initialized workspace bundles are claimed by a project."
+            : `${unclaimedBundleCount} initialized bundle(s) have not been claimed yet.`,
+      },
+      {
+        id: "binding_integrity",
+        label: "Owner binding integrity",
+        status: conflictBindingCount === 0 ? "pass" : "warn",
+        detail:
+          conflictBindingCount === 0
+            ? "No conflicting or unavailable owner bindings recorded."
+            : `${conflictBindingCount} owner binding(s) are marked conflict or unavailable.`,
+      },
+    ];
+
+    const readyForV2 =
+      checks.every((c) => c.status !== "fail") &&
+      corruptBackupCount === 0 &&
+      !this.corruptFile &&
+      legacyScheduleCount === 0 &&
+      unclaimedBundleCount === 0;
+
+    return {
+      schema: "muweave.migration-report.v1",
+      registrySchema: PROJECTS_SCHEMA,
+      projectCount,
+      archivedCount,
+      corruptBackupCount,
+      corruptBackups,
+      legacyScheduleCount,
+      unclaimedBundleCount,
+      readyForV2,
+      checks,
+      generatedAt: new Date().toISOString(),
+    };
   }
   private require(projectId: string): ProjectRecordV1 {
     const project = this.get(projectId);
