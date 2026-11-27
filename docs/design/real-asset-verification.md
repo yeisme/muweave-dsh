@@ -16,7 +16,7 @@
 | eikona 有没有历史产出 | 有，**2548 个 runs**，visual-library 里有真实 PNG blob |
 | 能不能复用历史产出 | 可以（`eikona library save` / `assets handoff` 是官方路径），但需要把产出绑定到 workspace 才会被 bundle sync 编译进 `.muweave/` |
 | 能不能现生成 | **不能**：`eikona generate` 报 `PROVIDER_UNAVAILABLE`；实测 `curl api.openai.com` 返回 **HTTP 000（不可达）** |
-| 内网网关 | `10.10.1.101:18976` 返回 **401**（需 MCP token） |
+| 内网网关 | `<内网网关地址>` 返回 **401**（需访问令牌） |
 
 ## 2. 所以「No image」到底是谁的问题
 

@@ -6,7 +6,7 @@
   "type": "module",
   "engines": {
     "node": ">=22.19.0",
-    "dsh": "0.2.2-rc.1"
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
   },
   "packageManager": "pnpm@10.16.1",
   "pnpm": {
@@ -37,5 +37,6 @@
     "vitest": "^4.1.0",
     "yaml": "^2.7.0",
     "zod": "^4.3.6"
-  }
+  },
+  "license": "MIT"
 }
