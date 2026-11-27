@@ -5,7 +5,8 @@
 
 import type { CSSProperties, ReactNode } from 'react'
 import type { ProjectCover } from './media'
-import { Icon, type MuweaveIconName } from './ui'
+import { MediaThumbnail, type MediaThumbnailProps } from './media-card'
+import { Icon, StatusTag, type MuweaveIconName } from './ui'
 
 export function PillButton({
   children,
@@ -124,33 +125,60 @@ export function Poster({ title, meta }: { title: ReactNode; meta?: ReactNode }) 
 /** Media-first card: inset media, glass round actions on hover/focus, title and meta below. */
 export function MediaCard({
   media,
+  image,
   actions,
   title,
   meta,
   children,
   ratio,
+  version,
+  review,
+  shotCount,
+  stale,
+  selected,
+  lang,
   ...rest
 }: {
-  media: ReactNode
+  media?: ReactNode
+  image?: MediaThumbnailProps & Record<`data-${string}`, string | undefined>
   actions?: ReactNode
   title?: ReactNode
   meta?: ReactNode
   children?: ReactNode
   ratio?: string
+  version?: string
+  review?: string
+  shotCount?: number
+  stale?: boolean
+  selected?: boolean
+  lang?: string
 } & Record<`data-${string}`, string | undefined>) {
+  const hasBadges = Boolean(version || review || shotCount !== undefined || stale)
   return (
     <article
       className="mw-dsh-card mw-media-card"
       data-interactive="true"
+      data-selected={selected ? 'true' : undefined}
+      data-p0-media-card={image ? 'true' : undefined}
       style={{ '--mw-media-ratio': ratio ?? '4 / 3' } as CSSProperties}
       {...rest}
     >
-      <div className="mw-media-card-media">{media}</div>
+      {image || media ? (
+        <div className="mw-media-card-media">{image ? <MediaThumbnail {...image} /> : media}</div>
+      ) : null}
       {actions ? <div className="mw-media-card-actions">{actions}</div> : null}
-      {title || meta || children ? (
+      {title || meta || hasBadges || children ? (
         <div className="mw-media-card-body">
           {title ? <h3 className="mw-media-card-title">{title}</h3> : null}
           {meta ? <p className="mw-media-card-meta">{meta}</p> : null}
+          {hasBadges ? (
+            <div className="mw-media-card-badges">
+              {version ? <span className="mw-chip mw-num" data-media-version={version}>{version}</span> : null}
+              {review ? <StatusTag status={review === 'unreviewed' ? 'waiting_review' : review} lang={lang ?? 'zh'} /> : null}
+              {shotCount !== undefined ? <span className="mw-chip mw-num" data-media-shots={shotCount}>绑定 {shotCount} 镜</span> : null}
+              {stale ? <StatusTag status="stale" lang={lang ?? 'zh'} /> : null}
+            </div>
+          ) : null}
           {children}
         </div>
       ) : null}

@@ -7,23 +7,26 @@
 import type { JobRecordV1, JobSlotV1, MuweaveDomain, MuweaveElementSummaryV1 } from '@yeisme/dsh-muweave-core/client'
 
 export type StageId = 'inspiration' | 'script' | 'visual' | 'storyboard' | 'sound'
+export type SpineStageId = StageId | 'final'
 
 export const STAGES: readonly { id: StageId; labelZh: string; labelEn: string; domain?: MuweaveDomain }[] = [
   { id: 'inspiration', labelZh: '灵感', labelEn: 'Inspiration', domain: 'harness' },
   { id: 'script', labelZh: '剧本', labelEn: 'Script', domain: 'script' },
   { id: 'visual', labelZh: '视觉', labelEn: 'Visual', domain: 'eikona' },
   { id: 'storyboard', labelZh: '分镜', labelEn: 'Storyboard', domain: 'drama' },
-  // No owner domain ships sound elements yet: the row stays, always empty and greyed (§8.4).
+  // Audio arrives through the job ledger, outside the bundle's four domains.
   { id: 'sound', labelZh: '声音', labelEn: 'Sound' },
 ]
 
 export const STAGE_IDS: readonly StageId[] = STAGES.map((s) => s.id)
+export const SPINE_STAGE_IDS: readonly SpineStageId[] = [...STAGE_IDS, 'final']
 
 export function stageOfDomain(domain: MuweaveDomain | string): StageId | undefined {
   return STAGES.find((s) => s.domain !== undefined && s.domain === domain)?.id
 }
 
-export function stageLabel(stage: StageId, lang: string): string {
+export function stageLabel(stage: SpineStageId, lang: string): string {
+  if (stage === 'final') return lang === 'en' ? 'Final cut' : '成片'
   const def = STAGES.find((s) => s.id === stage)
   return def ? (lang === 'en' ? def.labelEn : def.labelZh) : stage
 }
@@ -36,6 +39,15 @@ export function groupByStage(elements: readonly MuweaveElementSummaryV1[]): Reco
     if (stage) out[stage].push(el)
   }
   return out
+}
+
+export function groupBySpineStage(elements: readonly MuweaveElementSummaryV1[]): Record<SpineStageId, MuweaveElementSummaryV1[]> {
+  const groups = groupByStage(elements)
+  return {
+    ...groups,
+    storyboard: groups.storyboard.filter((el) => el.kind !== 'drama.edit_timeline'),
+    final: groups.storyboard.filter((el) => el.kind === 'drama.edit_timeline'),
+  }
 }
 
 const PENDING_STATUSES = new Set(['waiting_review', 'draft', 'stale'])
@@ -65,11 +77,19 @@ export function defaultStage(groups: Record<StageId, readonly MuweaveElementSumm
   return STAGE_IDS.find((id) => (groups[id]?.length ?? 0) > 0) ?? STAGE_IDS[0]!
 }
 
+export function defaultSpineStage(groups: Record<SpineStageId, readonly MuweaveElementSummaryV1[]>): SpineStageId {
+  return SPINE_STAGE_IDS.find((id) => groups[id].length > 0) ?? 'inspiration'
+}
+
 /** j / k: next or previous stage, clamped at the ends. */
 export function stepStage(current: StageId, delta: number): StageId {
-  const i = STAGE_IDS.indexOf(current)
-  const next = Math.min(STAGE_IDS.length - 1, Math.max(0, (i < 0 ? 0 : i) + delta))
-  return STAGE_IDS[next]!
+  return stepAmongStages(STAGE_IDS, current, delta)
+}
+
+export function stepAmongStages<T extends SpineStageId>(stages: readonly T[], current: T, delta: number): T {
+  const i = Math.max(0, stages.indexOf(current))
+  const next = Math.min(stages.length - 1, Math.max(0, i + delta))
+  return stages[next] ?? current
 }
 
 /** G then a digit: the Nth stage (1-based); undefined for anything else. */

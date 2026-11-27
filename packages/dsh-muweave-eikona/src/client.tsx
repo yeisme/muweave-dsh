@@ -1,28 +1,30 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import {
   CompanionList,
-  CoverCollage,
+  EmptyAction,
   EmptyState,
   Icon,
   IconButton,
   Masonry,
   MediaCard,
-  MediaPreview,
+  MediaThumbnail,
   PillButton,
-  RoomHero,
   SectionHead,
   Segmented,
   StatusTag,
   WorkspaceShell,
+  openGeneration,
   type WorkspaceNotice,
   registerMuweaveCreatorPlugin,
   stageItemToFloatingAgent,
   type DshClientContextLike,
+  type JobRecordV1,
+  type LinkedMediaRef,
   type MuweaveElementSummaryV1,
   type MuweaveElementV1,
   type MuweaveRpcClient,
   type MuweaveTranslator,
-  useProjectCovers,
+  useGenerationStore,
 } from '@yeisme/dsh-muweave-core/client'
 
 export const name = '@yeisme/dsh-muweave-eikona'
@@ -57,16 +59,8 @@ const zh = {
   specQuality: '质量档位',
   candidateCount: '张候选',
   overallScore: '综合分',
-  noPreview: '仅元数据',
-  previewPending: '预览载入中',
   decisionDone: '已回执并同步 .muweave/',
   handoffDone: '已完成并写入 .muweave/',
-  heroEyebrow: 'Eikona · 视觉候选',
-  heroLede: '挑出能进片的那一张：采纳、绑定母版，再交接给分镜。',
-  heroEmptyTitle: '还没有视觉候选',
-  statGroups: '组',
-  statMasters: '母版',
-  statScores: '分卡',
   referGroup: '引用整组',
 }
 
@@ -95,16 +89,8 @@ const en: Record<keyof typeof zh, string> = {
   specQuality: 'Quality',
   candidateCount: 'candidates',
   overallScore: 'Overall',
-  noPreview: 'Metadata only',
-  previewPending: 'Loading preview',
   decisionDone: 'receipt recorded and .muweave/ synced',
   handoffDone: 'done and written to .muweave/',
-  heroEyebrow: 'Eikona · Visual candidates',
-  heroLede: 'Pick the frame that makes the cut: accept it, bind a master, hand it to the storyboard.',
-  heroEmptyTitle: 'No visual candidates yet',
-  statGroups: 'groups',
-  statMasters: 'masters',
-  statScores: 'scorecards',
   referGroup: 'Refer group',
 }
 
@@ -163,18 +149,19 @@ function ScoreMeter({ label, value }: { label: string; value: number }) {
   )
 }
 
-function CandidateMediaPreview({
-  rpc,
-  sha256,
-  alt,
-  t,
-}: {
-  rpc: MuweaveRpcClient
-  sha256?: string
-  alt: string
-  t: (k: string) => string
-}) {
-  return <MediaPreview rpc={rpc} sha256={sha256} alt={alt} pendingLabel={t('previewPending')} emptyLabel={t('noPreview')} />
+interface ShotMediaRow {
+  shotRef: string
+  linkedMedia?: LinkedMediaRef[]
+}
+
+async function loadShotMedia(rpc: MuweaveRpcClient): Promise<ShotMediaRow[] | undefined> {
+  const list = await rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { kind: 'drama.storyboard_table' })
+  if (!list.ok || !Array.isArray(list.data.elements)) return undefined
+  const boards = await Promise.all(list.data.elements.map((board) =>
+    rpc.call<{ element: MuweaveElementV1<{ rows?: ShotMediaRow[] }> }>('bundle.element.get', { elementId: board.elementId }),
+  ))
+  if (boards.some((board) => !board.ok)) return undefined
+  return boards.flatMap((board) => board.ok ? board.data.element.payload.rows ?? [] : [])
 }
 
 export function EikonaMainPage({
@@ -190,13 +177,18 @@ export function EikonaMainPage({
   const [details, setDetails] = useState<Record<string, MuweaveElementV1>>({})
   const [gridCols, setGridCols] = useState<2 | 4>(4)
   const [zoomed, setZoomed] = useState(false)
+  const [selectedArtifact, setSelectedArtifact] = useState<string>()
+  const [shots, setShots] = useState<ShotMediaRow[]>()
+  const [jobs, setJobs] = useState<JobRecordV1[]>([])
+  const [refreshing, setRefreshing] = useState(false)
+  const [previewRevision, setPreviewRevision] = useState(0)
   const [notice, setNotice] = useState<WorkspaceNotice | null>(null)
   const [specModel, setSpecModel] = useState('openai/gpt-image-2.5-sunburst')
   const [specSize, setSpecSize] = useState('1152x2048')
   const [specQuality, setSpecQuality] = useState('high')
   const [specResult, setSpecResult] = useState<string>('')
   const lang = coreT('langCode')
-  const covers = useProjectCovers(rpc, 3)
+  const { mediaRevision } = useGenerationStore()
 
   const loadEikona = useCallback(async () => {
     const res = await rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { domain: 'eikona' })
@@ -215,9 +207,36 @@ export function EikonaMainPage({
     setDetails(map)
   }, [rpc])
 
+  const refreshVisual = useCallback(async () => {
+    const [shotRows, jobResult] = await Promise.all([
+      loadShotMedia(rpc),
+      rpc.call<{ jobs?: JobRecordV1[] }>('job.list', {}),
+      loadEikona(),
+    ])
+    setShots(shotRows)
+    if (jobResult.ok) setJobs(jobResult.data.jobs ?? [])
+  }, [rpc, loadEikona])
+
   useEffect(() => {
-    void loadEikona()
-  }, [loadEikona])
+    void refreshVisual()
+  }, [refreshVisual, mediaRevision])
+
+  const refreshPreview = async () => {
+    setRefreshing(true)
+    try {
+      const result = await rpc.call('bundle.sync', {})
+      if (!result.ok) {
+        setNotice({ tone: 'bad', text: result.error.message })
+        return
+      }
+      await refreshVisual()
+      setPreviewRevision((revision) => revision + 1)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const generate = (trigger: HTMLButtonElement) => openGeneration({ capabilityId: 'eikona.image.generate', stage: 'visual' }, trigger)
 
   const runControlledDecision = async (runId: string, artifactId: string, decision: 'accept' | 'reject') => {
     const idem = `eikona-${decision}-${runId}-${artifactId}`

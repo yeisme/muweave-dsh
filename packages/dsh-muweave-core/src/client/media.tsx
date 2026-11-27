@@ -38,20 +38,22 @@ export function MediaPreview({
   )
 }
 
-export function useMediaUrl(rpc: MuweaveRpcClient, sha256: string | undefined): string | undefined {
-  const [url, setUrl] = useState<string | undefined>(undefined)
+export function useMediaUrl(rpc: MuweaveRpcClient, sha256: string | undefined, mimeType = 'image/png'): string | undefined {
+  const [resolved, setResolved] = useState<{ rpc: MuweaveRpcClient; sha256: string; mimeType: string; url: string }>()
   useEffect(() => {
-    setUrl(undefined)
+    setResolved(undefined)
     if (!sha256) return
     let cancelled = false
-    void rpc.resolveMediaUrl(sha256, 'image/png').then((u) => {
-      if (!cancelled) setUrl(u)
-    })
+    void rpc.resolveMediaUrl(sha256, mimeType)
+      .then((url) => {
+        if (!cancelled && url) setResolved({ rpc, sha256, mimeType, url })
+      })
+      .catch(() => undefined)
     return () => {
       cancelled = true
     }
-  }, [rpc, sha256])
-  return url
+  }, [rpc, sha256, mimeType])
+  return resolved?.rpc === rpc && resolved.sha256 === sha256 && resolved.mimeType === mimeType ? resolved.url : undefined
 }
 
 export interface ProjectCoverRef {

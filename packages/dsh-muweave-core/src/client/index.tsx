@@ -195,8 +195,18 @@ export function registerMuweaveCreatorPlugin(
   const pluginTRef = { current: ctx.locale.bind(options.pluginNamespace) }
   const coreT = ((key: MuweaveDictKey) => {
     const bound = ctx.locale.bind(MUWEAVE_LOCALE_NS)
-    return bound(key) || createFallbackTranslator('zh')(key)
+    const translated = bound(key)
+    return translated && translated !== key ? translated : createFallbackTranslator('zh')(key)
   }) as MuweaveTranslator
+  const pluginFallback = (key: string) => options.dictionaries[coreT('langCode') === 'en' ? 'en' : 'zh'][key] ?? options.dictionaries.zh[key]
+  const pluginT = (key: string) => {
+    const translated = pluginTRef.current(key)
+    return translated && translated !== key ? translated : pluginFallback(key) ?? ''
+  }
+  const localizedRoomText = (text: () => string, fallbackKey: string) => () => {
+    const current = text()
+    return pluginFallback(current) ?? (current || pluginT(fallbackKey))
+  }
 
   ctx.effect(() => ctx.locale.register(options.pluginNamespace, options.dictionaries), `${pane.pluginId}: dict`)
   ctx.effect(() => mountMuweaveCoreStyles(), `${pane.pluginId}: core styles`)
@@ -253,10 +263,10 @@ export function registerMuweaveCreatorPlugin(
   }, `${pane.pluginId}: prime element cache`)
 
   const MainBound = () => (
-    <options.MainComponent rpc={rpc} t={(k) => pluginTRef.current(k)} coreT={coreT} />
+    <options.MainComponent rpc={rpc} t={pluginT} coreT={coreT} />
   )
   const CompanionBound = () => (
-    <options.CompanionComponent rpc={rpc} t={(k) => pluginTRef.current(k)} coreT={coreT} />
+    <options.CompanionComponent rpc={rpc} t={pluginT} coreT={coreT} />
   )
 
   ctx.effect(
@@ -264,8 +274,8 @@ export function registerMuweaveCreatorPlugin(
       registerTheaterRoom({
         id: pane.panelId,
         order: pane.order,
-        title: pane.roomTitle ?? pane.title,
-        description: pane.title,
+        title: localizedRoomText(pane.roomTitle ?? pane.title, 'roomTitle'),
+        description: localizedRoomText(pane.title, 'panelTitle'),
         icon: pane.icon,
         domains: pane.domains ?? [],
         Main: MainBound,
@@ -275,16 +285,16 @@ export function registerMuweaveCreatorPlugin(
   )
 
   for (const extra of options.extraRooms ?? []) {
-    const ExtraMain = () => <extra.MainComponent rpc={rpc} t={(k) => pluginTRef.current(k)} coreT={coreT} />
+    const ExtraMain = () => <extra.MainComponent rpc={rpc} t={pluginT} coreT={coreT} />
     const ExtraCompanion = extra.CompanionComponent ?? options.CompanionComponent
-    const ExtraCompanionBound = () => <ExtraCompanion rpc={rpc} t={(k) => pluginTRef.current(k)} coreT={coreT} />
+    const ExtraCompanionBound = () => <ExtraCompanion rpc={rpc} t={pluginT} coreT={coreT} />
     ctx.effect(
       () =>
         registerTheaterRoom({
           id: extra.panelId,
           order: extra.order,
-          title: extra.roomTitle ?? extra.title,
-          description: extra.title,
+          title: localizedRoomText(extra.roomTitle ?? extra.title, 'roomTitle'),
+          description: localizedRoomText(extra.title, 'panelTitle'),
           icon: extra.icon,
           domains: extra.domains ?? [],
           Main: ExtraMain,
@@ -595,6 +605,7 @@ export {
   type ProjectCover,
   type ProjectCoverRef,
 } from './media'
+export { EmptyAction, MediaThumbnail, type EmptyActionProps, type MediaThumbnailProps } from './media-card'
 export { GenerationLauncher } from './generation'
 export { formatKeyHint, isEditableTarget, keyBinding, matchKey, useKeySequence, type KeyBinding } from './keymap'
 export {
