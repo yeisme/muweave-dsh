@@ -8,12 +8,13 @@ import {
   useKeySequence,
   type JobRecordV1,
   type MuweaveElementSummaryV1,
+  type MuweaveElementV1,
   type MuweaveRpcClient,
   type ScheduleBoardV1,
   type ScheduleEntryViewV1,
 } from '@yeisme/dsh-muweave-core/client'
 import { SPINE_STAGE_IDS, STAGES, STAGE_IDS, pendingCount, stageDotState, stageLabel, stepAmongStages, type SpineStageId, type StageDotState, type StageId } from './stage-map'
-import { stageSpineMetrics, type SpineMetric, type StageSpineGroups } from './stage-spine-data'
+import { stageSpineMetrics, type SpineMetric, type SpineShotRow, type StageSpineGroups } from './stage-spine-data'
 
 const OVERVIEW_ROOM_ID = 'muweave-workbench'
 
@@ -176,6 +177,7 @@ export function StageSpine({
   onSelect,
   lang,
   projectId,
+  workspaceId,
   refreshKey,
   jobs,
   bundleAvailable = true,
@@ -186,12 +188,14 @@ export function StageSpine({
   onSelect: (stage: SpineStageId) => void
   lang: string
   projectId?: string
+  workspaceId?: string
   refreshKey?: unknown
   jobs?: readonly JobRecordV1[]
   bundleAvailable?: boolean
 }) {
   const rootRef = useStageNavigation(SPINE_STAGE_IDS, current, onSelect)
   const [board, setBoard] = useState<{ rpc: MuweaveRpcClient; entries?: ScheduleEntryViewV1[] }>()
+  const [shots, setShots] = useState<{ rpc: MuweaveRpcClient; matches: StageSpineGroups['storyboard']; workspaceId?: string; rows?: SpineShotRow[] }>()
   useEffect(() => {
     const abort = new AbortController()
     const request = async () => {
@@ -207,8 +211,31 @@ export function StageSpine({
     return () => abort.abort()
   }, [rpc, projectId, refreshKey])
 
+  const tables = groups.storyboard
+  useEffect(() => {
+    const ids = tables.filter((el) => el.kind === 'drama.storyboard_table').map((el) => el.elementId)
+    if (!ids.length) return undefined
+    const abort = new AbortController()
+    const load = async () => {
+      const replies = await Promise.all(ids.map((elementId) => rpc.call<{ element: MuweaveElementV1<{ rows?: SpineShotRow[] }> }>(
+        'bundle.element.get', { elementId, ...(workspaceId ? { workspaceId } : {}) }, abort.signal,
+      )))
+      const results = replies.map((response) => response.ok ? response.data?.element?.payload?.rows : undefined)
+      const rows = results.every(Array.isArray) ? results.flatMap((result) => (result ?? []).filter((row) => row && typeof row.shotRef === 'string' && row.shotRef)) : undefined
+      if (!abort.signal.aborted) setShots({ rpc, matches: tables, workspaceId, rows })
+    }
+    void load().catch(() => undefined)
+    return () => abort.abort()
+  }, [rpc, tables, workspaceId])
+
   const en = lang === 'en'
-  const metrics = stageSpineMetrics({ groups, jobs, entries: board?.rpc === rpc ? board.entries : undefined, projectId })
+  const metrics = stageSpineMetrics({
+    groups,
+    jobs,
+    projectId,
+    entries: board?.rpc === rpc ? board.entries : undefined,
+    storyboardRows: shots?.rpc === rpc && shots.matches === tables && shots.workspaceId === workspaceId ? shots.rows : undefined,
+  })
   return (
     <nav ref={rootRef} className="mw-stage-axis" data-stage-axis="true" data-stage-spine="true" data-stage-region="axis" aria-label={en ? 'Stages' : '制作阶段'}>
       <div className="mw-stage-axis-head">
