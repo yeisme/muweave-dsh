@@ -160,6 +160,13 @@ export const RPC_ACTIONS = [
   'drama.shot.review.set',
   'drama.shot.review.batch',
   'drama.export.manifest',
+  'drama.cut.get',
+  'drama.cut.set',
+  'drama.cut.reset',
+  'adapter.custom.list',
+  'adapter.custom.save',
+  'adapter.custom.remove',
+  'adapter.custom.test',
 ] as const
 
 export type MuweaveRpcAction =
@@ -427,19 +434,74 @@ export interface ShotReviewSetInputV1 {
   expectedRevision?: number
 }
 
-export type DramaExportFormat = 'cut_manifest_v1' | 'cmx3600_edl' | 'shotlist_csv'
+export type DramaExportFormat =
+  | 'cut_manifest_v1'
+  | 'cmx3600_edl'
+  | 'shotlist_csv'
+  | 'fcpxml_1_10'
+  | 'jianying_draft_v1'
 
 export interface DramaExportResultV1 {
   schema: 'muweave.drama-export.v1'
   format: DramaExportFormat
   filename: string
-  mimeType: 'application/json' | 'text/plain' | 'text/csv'
+  mimeType: 'application/json' | 'text/plain' | 'text/csv' | 'application/xml'
   shotCount: number
   totalDurationMs: number
   fps: number
   aspectRatio: string
   content: string
   generatedAt: string
+}
+
+export type CustomAdapterProtocol = 'openai_http' | 'comfyui_http' | 'cli_wrapper'
+
+export interface CustomAdapterConfigV1 {
+  adapterId: string
+  title: string
+  protocol: CustomAdapterProtocol
+  kind: 'image' | 'voice' | 'video' | 'sfx' | 'music'
+  stage: 'visual' | 'storyboard' | 'sound'
+  enabled: boolean
+  endpointUrl?: string
+  binary?: string
+  argsTemplate?: string[]
+  model?: string
+  /** Name of the environment variable holding the API key (e.g. OPENAI_API_KEY); NEVER the secret itself. */
+  authEnvVar?: string
+  unitPriceUsd?: number
+  defaultSlots?: number
+  maxSlots?: number
+  allowPrivateNetwork?: boolean
+  updatedAt: string
+}
+
+export interface CustomAdapterViewV1 extends CustomAdapterConfigV1 {
+  /** True when authEnvVar is omitted or process.env[authEnvVar] is non-empty; secret value is NEVER returned. */
+  envReady: boolean
+}
+
+export type CutTransitionKind = 'cut' | 'crossfade' | 'dip_to_black'
+
+export interface EpisodeCutOverrideV1 {
+  workspaceId: string
+  episodeRef: string
+  shotOrder: string[]
+  omittedShotRefs: string[]
+  durationOverridesMicros: Record<string, number>
+  transitions: Record<string, CutTransitionKind>
+  revision: number
+  updatedAt: string
+}
+
+export interface EpisodeCutSetInputV1 {
+  workspaceId?: string
+  episodeRef: string
+  shotOrder?: string[]
+  omittedShotRefs?: string[]
+  durationOverridesMicros?: Record<string, number>
+  transitions?: Record<string, CutTransitionKind>
+  expectedRevision?: number
 }
 
 export interface ProjectMigrationCheckV1 {

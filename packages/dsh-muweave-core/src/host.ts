@@ -45,10 +45,17 @@ import {
   type WorkspaceSummaryView,
 } from './protocol'
 import { CapabilityService } from './capabilities/service'
+import {
+  CUSTOM_ADAPTER_PRESETS,
+  CustomAdapterError,
+  CustomAdapterStore,
+  testCustomAdapter,
+} from './capabilities/custom-adapters'
 import { BotTaskService } from './bot-task/service'
 import { ScheduleInputError, ScheduleStore } from './schedule-store'
 import { ProjectInputError, ProjectStore } from './project-store'
 import { DramaReviewInputError, DramaReviewStore, isValidShotReviewStatus } from './drama-review-store'
+import { DramaCutInputError, DramaCutStore } from './drama-cut-store'
 import {
   buildDramaExportPackage,
   DramaExportInputError,
@@ -367,6 +374,10 @@ export class CreatorHostService {
   private readonly projects: ProjectStore
   /** Director shot-review persistence; never touches canonical owner databases. */
   private readonly dramaReviews: DramaReviewStore
+  /** Non-destructive episode cut overrides; never touches canonical Scaena data. */
+  private readonly dramaCuts: DramaCutStore
+  /** User-configured external engine bridge adapters (env var names only, zero plaintext secrets). */
+  private readonly customAdapters: CustomAdapterStore
 
   constructor(options: CreatorHostServiceOptions = {}) {
     this.runner = options.runner ?? defaultCliRunner
@@ -383,6 +394,8 @@ export class CreatorHostService {
     this.schedule = new ScheduleStore(path.join(this.pluginDataDir, 'schedule.v1.json'))
     this.projects = new ProjectStore(path.join(this.pluginDataDir, 'projects.v1.json'))
     this.dramaReviews = new DramaReviewStore(path.join(this.pluginDataDir, 'drama-reviews.v1.json'))
+    this.dramaCuts = new DramaCutStore(path.join(this.pluginDataDir, 'drama-cuts.v1.json'))
+    this.customAdapters = new CustomAdapterStore(path.join(this.pluginDataDir, 'custom-adapters.v1.json'))
     this.restorePersistedLedgerSync()
     this.capabilities = new CapabilityService({
       pluginDataDir: this.pluginDataDir,
@@ -393,6 +406,8 @@ export class CreatorHostService {
       syncWorkspace: async (ws) => {
         await syncBundle({ workspaceDir: ws.dir, runner: this.runner, upstreamPayloads: { dshArtifacts: this.dshToolArtifacts.get(ws.id) ?? [] } })
       },
+      customAdapters: this.customAdapters,
+      fetchImpl: this.fetchImpl,
       logger: (event, fields) => this.logger?.('muweave').info({ event, hostInstanceId: this.hostInstanceId, ...fields }),
     })
 
@@ -744,6 +759,15 @@ export class CreatorHostService {
         }), this.hostInstanceId)
       }
       if (err instanceof DramaExportInputError) {
+        return stampHost(rpcFail(this.generation, err.code, err.message, { retryable: false }), this.hostInstanceId)
+      }
+      if (err instanceof DramaCutInputError) {
+        return stampHost(rpcFail(this.generation, err.code, err.message, {
+          retryable: false,
+          ...(err.details ? { details: err.details } : {}),
+        }), this.hostInstanceId)
+      }
+      if (err instanceof CustomAdapterError) {
         return stampHost(rpcFail(this.generation, err.code, err.message, { retryable: false }), this.hostInstanceId)
       }
       throw err
@@ -1384,6 +1408,11 @@ export class CreatorHostService {
           }
         }
 
+        const episodeRef = typeof payload.episodeRef === 'string' && payload.episodeRef.trim() ? payload.episodeRef.trim() : undefined
+        const distinctEpisodes = [...new Set(shots.map((s) => s.episodeRef).filter((e): e is string => Boolean(e)))]
+        const effectiveEpisodeRef = episodeRef ?? (distinctEpisodes.length === 1 ? distinctEpisodes[0] : undefined)
+        const cutOverride = effectiveEpisodeRef ? this.dramaCuts.get(ws.id, effectiveEpisodeRef) : undefined
+
         const reviews = this.dramaReviews.list({ workspaceId: ws.id }).reviews
         try {
           const result = buildDramaExportPackage({
@@ -1392,6 +1421,8 @@ export class CreatorHostService {
             title: index.title,
             fps: typeof payload.fps === 'number' ? payload.fps : timelineFps,
             aspectRatio: typeof payload.aspectRatio === 'string' ? payload.aspectRatio : timelineAspectRatio,
+            ...(episodeRef ? { episodeRef } : {}),
+            ...(cutOverride ? { cutOverride } : {}),
             shots,
             reviews,
           })
@@ -1402,6 +1433,67 @@ export class CreatorHostService {
           }
           throw err
         }
+      }
+
+      case 'drama.cut.get': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const episodeRef = typeof payload.episodeRef === 'string' && payload.episodeRef.trim() ? payload.episodeRef.trim() : undefined
+        if (!episodeRef) {
+          return rpcOk(this.generation, { cuts: this.dramaCuts.list(ws.id) })
+        }
+        return rpcOk(this.generation, { cut: this.dramaCuts.get(ws.id, episodeRef) ?? null })
+      }
+
+      case 'drama.cut.set': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const cut = this.dramaCuts.set(ws.id, {
+          episodeRef: typeof payload.episodeRef === 'string' ? payload.episodeRef : '',
+          shotOrder: payload.shotOrder as never,
+          omittedShotRefs: payload.omittedShotRefs as never,
+          durationOverridesMicros: payload.durationOverridesMicros as never,
+          transitions: payload.transitions as never,
+          expectedRevision: payload.expectedRevision as never,
+        })
+        this.bumpGeneration()
+        return rpcOk(this.generation, { cut })
+      }
+
+      case 'drama.cut.reset': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const episodeRef = typeof payload.episodeRef === 'string' ? payload.episodeRef : ''
+        const reset = this.dramaCuts.reset(ws.id, episodeRef)
+        if (reset) this.bumpGeneration()
+        return rpcOk(this.generation, { reset })
+      }
+
+      case 'adapter.custom.list': {
+        return rpcOk(this.generation, {
+          adapters: this.customAdapters.list(),
+          presets: CUSTOM_ADAPTER_PRESETS,
+        })
+      }
+
+      case 'adapter.custom.save': {
+        const adapter = this.customAdapters.save(payload.adapter ?? payload)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { adapter })
+      }
+
+      case 'adapter.custom.remove': {
+        const adapterId = typeof payload.adapterId === 'string' ? payload.adapterId : ''
+        const removed = this.customAdapters.remove(adapterId)
+        if (removed) this.bumpGeneration()
+        return rpcOk(this.generation, { removed })
+      }
+
+      case 'adapter.custom.test': {
+        const adapterId = typeof payload.adapterId === 'string' ? payload.adapterId.trim() : ''
+        const cfg = adapterId ? this.customAdapters.get(adapterId) : undefined
+        if (!cfg) {
+          return rpcFail(this.generation, 'muweave/adapter_not_found', `Custom adapter not found: ${adapterId}`, { retryable: false })
+        }
+        const report = await testCustomAdapter(cfg, this.runner, this.fetchImpl)
+        return rpcOk(this.generation, report)
       }
 
       case 'project.list': {

@@ -1,21 +1,30 @@
-import { containsHostPath, findPlaintextCredential } from '@yeisme/muweave-bundle/consumer'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { readCasBlobVerified } from '@yeisme/muweave-bundle'
+import { containsHostPath, findPlaintextCredential, isSha256Digest } from '@yeisme/muweave-bundle/consumer'
+import { applyEpisodeCut } from './drama-cut-store'
 import type {
+  CutTransitionKind,
   DramaExportFormat,
   DramaExportResultV1,
+  EpisodeCutOverrideV1,
   ShotReviewRecordV1,
   ShotReviewStatus,
 } from './protocol'
 
 /**
- * Pure rough-cut package compiler for Drama Studio v2.
- * Produces sanitized Cut Manifest JSON, CMX 3600 EDL, and UTF-8 BOM shotlist CSV
- * with deterministic SMPTE timecodes and zero host paths / credentials.
+ * Pure rough-cut package compiler for Drama Studio v2/v7.
+ * Produces sanitized Cut Manifest JSON, CMX 3600 EDL, UTF-8 BOM shotlist CSV,
+ * FCPXML 1.10, and Jianying/CapCut draft_content.json with deterministic SMPTE timecodes
+ * and zero host paths / credentials.
  */
 
 export const VALID_EXPORT_FORMATS: readonly DramaExportFormat[] = [
   'cut_manifest_v1',
   'cmx3600_edl',
   'shotlist_csv',
+  'fcpxml_1_10',
+  'jianying_draft_v1',
 ] as const
 
 export const VALID_EXPORT_FPS = [24, 25, 30] as const
@@ -62,6 +71,8 @@ export interface DramaExportBuildInput {
   title: string
   fps?: number
   aspectRatio?: string
+  episodeRef?: string
+  cutOverride?: EpisodeCutOverrideV1
   shots: readonly DramaExportShotInput[]
   reviews?: ReadonlyMap<string, ShotReviewRecordV1> | readonly ShotReviewRecordV1[]
   generatedAt?: string
@@ -76,6 +87,7 @@ interface CompiledShot {
   durationMs: number
   inTc: string
   outTc: string
+  transition: CutTransitionKind
   reviewStatus: ShotReviewStatus
   reviewNote?: string
   reviewTags: string[]
@@ -175,10 +187,19 @@ function compileShots(
   shots: readonly DramaExportShotInput[],
   reviewMap: Map<string, ShotReviewRecordV1>,
   fps: number,
+  episodeRef?: string,
+  cutOverride?: EpisodeCutOverrideV1,
 ): { compiled: CompiledShot[]; totalDurationMs: number } {
-  const ordered = [...shots].sort(
-    (a, b) => a.order - b.order || a.shotRef.localeCompare(b.shotRef),
-  )
+  const epFiltered = episodeRef
+    ? shots.filter((s) => !s.episodeRef || s.episodeRef === episodeRef)
+    : [...shots]
+  const hasCut = Boolean(cutOverride)
+  const ordered = hasCut
+    ? applyEpisodeCut(epFiltered, cutOverride)
+    : [...epFiltered]
+        .sort((a, b) => a.order - b.order || a.shotRef.localeCompare(b.shotRef))
+        .map((s) => ({ ...s, transition: 'cut' as CutTransitionKind }))
+
   let cursorMs = 0
   const compiled: CompiledShot[] = []
 
@@ -186,6 +207,7 @@ function compileShots(
     let inMs: number
     let outMs: number
     if (
+      !hasCut &&
       typeof shot.inMs === 'number' &&
       typeof shot.outMs === 'number' &&
       Number.isFinite(shot.inMs) &&
@@ -215,6 +237,7 @@ function compileShots(
       durationMs,
       inTc: msToSmpte(inMs, fps),
       outTc: msToSmpte(outMs, fps),
+      transition: shot.transition,
       reviewStatus: review?.status ?? 'draft',
       ...(review?.note ? { reviewNote: review.note } : {}),
       reviewTags: review ? [...review.tags] : [],
@@ -315,6 +338,191 @@ function renderShotlistCsv(shots: readonly CompiledShot[]): string {
   return `\uFEFF${[header, ...rows].join('\r\n')}\r\n`
 }
 
+function xmlEscape(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+export function portableMediaExt(mime?: string): string {
+  switch (mime) {
+    case 'image/jpeg': return 'jpg'
+    case 'image/webp': return 'webp'
+    case 'video/mp4': return 'mp4'
+    case 'video/webm': return 'webm'
+    case 'audio/mpeg': return 'mp3'
+    case 'audio/wav': return 'wav'
+    case 'audio/ogg': return 'ogg'
+    default: return 'png'
+  }
+}
+
+export function portableRelativeMediaPath(sha256: string, mime?: string): string {
+  const hex = sha256.replace(/^sha256:/, '').slice(0, 12)
+  return `media/${hex}.${portableMediaExt(mime)}`
+}
+
+function renderFcpxml110(
+  title: string,
+  fps: number,
+  aspectRatio: string,
+  totalDurationMs: number,
+  shots: readonly CompiledShot[],
+): string {
+  const isVertical = aspectRatio === '9:16'
+  const width = isVertical ? 1080 : 1920
+  const height = isVertical ? 1920 : 1080
+  const frameDuration = `1/${fps}s`
+  const toRational = (ms: number) => `${Math.max(0, Math.round((ms * fps) / 1000))}/${fps}s`
+
+  const assets: string[] = []
+  const spineItems: string[] = []
+  let assetCounter = 1
+
+  for (const shot of shots) {
+    const visual = shot.media.video ?? shot.media.keyframe ?? shot.media.reference
+    const assetId = `r${++assetCounter}`
+    const relSrc = visual?.sha256
+      ? portableRelativeMediaPath(visual.sha256, visual.mime)
+      : `media/${safeSlug(shot.shotRef)}.png`
+    const dur = toRational(shot.durationMs)
+    const offset = toRational(shot.inMs)
+    const hasVideo = Boolean(shot.media.video)
+    assets.push(
+      `    <asset id="${assetId}" name="${xmlEscape(shot.shotRef)}" src="${xmlEscape(relSrc)}" start="0s" duration="${dur}" hasVideo="1" hasAudio="${hasVideo ? '1' : '0'}" format="r1"/>`,
+    )
+    spineItems.push(
+      `            <asset-clip ref="${assetId}" offset="${offset}" name="${xmlEscape(`${shot.shotRef} (${shot.sceneRef})`)}" start="0s" duration="${dur}">`,
+    )
+    spineItems.push(
+      `              <note>${xmlEscape(`[${shot.reviewStatus}] transition=${shot.transition}${shot.reviewNote ? ` ${shot.reviewNote}` : ''}`)}</note>`,
+    )
+    for (const audioRole of AUDIO_ROLES) {
+      const audio = shot.media[audioRole]
+      if (!audio) continue
+      const audioAssetId = `r${++assetCounter}`
+      const audioSrc = audio.sha256
+        ? portableRelativeMediaPath(audio.sha256, audio.mime ?? 'audio/mpeg')
+        : `media/${safeSlug(shot.shotRef)}-${audioRole}.mp3`
+      assets.push(
+        `    <asset id="${audioAssetId}" name="${xmlEscape(`${shot.shotRef}_${audioRole}`)}" src="${xmlEscape(audioSrc)}" start="0s" duration="${dur}" hasVideo="0" hasAudio="1"/>`,
+      )
+      spineItems.push(
+        `              <asset-clip ref="${audioAssetId}" lane="-1" offset="0s" name="${xmlEscape(`${shot.shotRef}_${audioRole}`)}" start="0s" duration="${dur}"/>`,
+      )
+    }
+    spineItems.push('            </asset-clip>')
+  }
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE fcpxml>',
+    '<fcpxml version="1.10">',
+    '  <resources>',
+    `    <format id="r1" name="FFVideoFormat${width}x${height}p${fps}" frameDuration="${frameDuration}" width="${width}" height="${height}"/>`,
+    ...assets,
+    '  </resources>',
+    '  <library>',
+    `    <event name="${xmlEscape(title)}">`,
+    `      <project name="${xmlEscape(title)}">`,
+    `        <sequence format="r1" duration="${toRational(totalDurationMs)}" tcStart="0s" tcFormat="NDF">`,
+    '          <spine>',
+    ...spineItems,
+    '          </spine>',
+    '        </sequence>',
+    '      </project>',
+    '    </event>',
+    '  </library>',
+    '</fcpxml>',
+    '',
+  ].join('\n')
+}
+
+function renderJianyingDraftV1(
+  projectId: string,
+  title: string,
+  fps: number,
+  aspectRatio: string,
+  totalDurationMs: number,
+  shots: readonly CompiledShot[],
+): string {
+  const isVertical = aspectRatio === '9:16'
+  const width = isVertical ? 1080 : 1920
+  const height = isVertical ? 1920 : 1080
+
+  const videos: Array<Record<string, unknown>> = []
+  const audios: Array<Record<string, unknown>> = []
+  const videoSegments: Array<Record<string, unknown>> = []
+  const audioSegments: Array<Record<string, unknown>> = []
+
+  for (const shot of shots) {
+    const startUs = shot.inMs * 1000
+    const durationUs = shot.durationMs * 1000
+    const visual = shot.media.video ?? shot.media.keyframe ?? shot.media.reference
+    const matId = `mat_v_${shot.order}_${shot.shotRef}`
+    const relPath = visual?.sha256
+      ? portableRelativeMediaPath(visual.sha256, visual.mime)
+      : `media/${safeSlug(shot.shotRef)}.png`
+    videos.push({
+      id: matId,
+      type: shot.media.video ? 'video' : 'photo',
+      material_name: shot.shotRef,
+      path: relPath,
+      width,
+      height,
+      duration: durationUs,
+    })
+    videoSegments.push({
+      id: `seg_v_${shot.order}_${shot.shotRef}`,
+      material_id: matId,
+      target_timerange: { start: startUs, duration: durationUs },
+      source_timerange: { start: 0, duration: durationUs },
+      transition: shot.transition,
+      extra_material_refs: [],
+    })
+
+    for (const audioRole of AUDIO_ROLES) {
+      const audio = shot.media[audioRole]
+      if (!audio) continue
+      const audioId = `mat_a_${shot.order}_${shot.shotRef}_${audioRole}`
+      const audioPath = audio.sha256
+        ? portableRelativeMediaPath(audio.sha256, audio.mime ?? 'audio/mpeg')
+        : `media/${safeSlug(shot.shotRef)}-${audioRole}.mp3`
+      audios.push({
+        id: audioId,
+        type: 'extract_music',
+        name: `${shot.shotRef}_${audioRole}`,
+        path: audioPath,
+        duration: durationUs,
+      })
+      audioSegments.push({
+        id: `seg_a_${shot.order}_${shot.shotRef}_${audioRole}`,
+        material_id: audioId,
+        target_timerange: { start: startUs, duration: durationUs },
+        source_timerange: { start: 0, duration: durationUs },
+      })
+    }
+  }
+
+  const draft = {
+    schema: 'muweave.jianying-draft.v1',
+    id: projectId,
+    name: title,
+    fps,
+    duration: totalDurationMs * 1000,
+    canvas_config: { width, height, ratio: aspectRatio },
+    materials: { videos, audios, texts: [] },
+    tracks: [
+      { id: 'track_video_main', type: 'video', segments: videoSegments },
+      ...(audioSegments.length ? [{ id: 'track_audio_main', type: 'audio', segments: audioSegments }] : []),
+    ],
+  }
+  return `${JSON.stringify(draft, null, 2)}\n`
+}
+
 export function buildDramaExportPackage(input: DramaExportBuildInput): DramaExportResultV1 {
   if (!isValidDramaExportFormat(input.format)) {
     throw new DramaExportInputError(
@@ -332,7 +540,13 @@ export function buildDramaExportPackage(input: DramaExportBuildInput): DramaExpo
   const aspectRatio = (input.aspectRatio ?? '9:16').trim() || '9:16'
   const generatedAt = input.generatedAt ?? new Date().toISOString()
   const reviewMap = buildReviewLookup(input.reviews)
-  const { compiled, totalDurationMs } = compileShots(input.shots, reviewMap, fps)
+  const { compiled, totalDurationMs } = compileShots(
+    input.shots,
+    reviewMap,
+    fps,
+    input.episodeRef,
+    input.cutOverride,
+  )
   const slug = safeSlug(input.title || input.projectId)
 
   let content: string
@@ -354,6 +568,21 @@ export function buildDramaExportPackage(input: DramaExportBuildInput): DramaExpo
     content = renderCmx3600Edl(input.title, fps, compiled)
     filename = `${slug}-rough-cut.edl`
     mimeType = 'text/plain'
+  } else if (input.format === 'fcpxml_1_10') {
+    content = renderFcpxml110(input.title, fps, aspectRatio, totalDurationMs, compiled)
+    filename = `${slug}.fcpxml`
+    mimeType = 'application/xml'
+  } else if (input.format === 'jianying_draft_v1') {
+    content = renderJianyingDraftV1(
+      input.projectId,
+      input.title,
+      fps,
+      aspectRatio,
+      totalDurationMs,
+      compiled,
+    )
+    filename = 'draft_content.json'
+    mimeType = 'application/json'
   } else {
     content = renderShotlistCsv(compiled)
     filename = `${slug}-shotlist.csv`
@@ -381,4 +610,74 @@ export function buildDramaExportPackage(input: DramaExportBuildInput): DramaExpo
   }
 
   return result
+}
+
+export interface PortableBundleExportInput {
+  workspaceDir: string
+  exportResult: DramaExportResultV1
+  bundleDir: string
+  mediaBlobs: ReadonlyArray<{ sha256: string; mime?: string }>
+}
+
+export interface PortableBundleExportResult {
+  ok: true
+  filename: string
+  format: DramaExportFormat
+  copiedMediaFiles: string[]
+  readmeFile: 'README.txt'
+}
+
+/**
+ * Materializes a self-contained portable NLE handoff folder:
+ * `<bundleDir>/<exportResult.filename>`, `<bundleDir>/media/<sha12>.<ext>`, and `<bundleDir>/README.txt`
+ * with zero host filesystem paths inside any written file.
+ */
+export async function exportDramaPortableBundle(
+  input: PortableBundleExportInput,
+): Promise<PortableBundleExportResult> {
+  const outDir = path.resolve(input.bundleDir)
+  const mediaDir = path.join(outDir, 'media')
+  await mkdir(mediaDir, { recursive: true })
+
+  await writeFile(path.join(outDir, input.exportResult.filename), input.exportResult.content, 'utf8')
+
+  const seen = new Set<string>()
+  const copiedMediaFiles: string[] = []
+  for (const item of input.mediaBlobs) {
+    if (!isSha256Digest(item.sha256) || seen.has(item.sha256)) continue
+    seen.add(item.sha256)
+    const rel = portableRelativeMediaPath(item.sha256, item.mime)
+    try {
+      const bytes = await readCasBlobVerified(input.workspaceDir, item.sha256)
+      await writeFile(path.join(outDir, rel), bytes)
+      copiedMediaFiles.push(rel)
+    } catch {
+      /* skip missing/unverified CAS blobs cleanly */
+    }
+  }
+
+  const readme = [
+    'MuWeave DSH Portable Rough-Cut Bundle',
+    `Format: ${input.exportResult.format}`,
+    `Timeline File: ${input.exportResult.filename}`,
+    `Shots: ${input.exportResult.shotCount} | Duration: ${(input.exportResult.totalDurationMs / 1000).toFixed(2)}s | FPS: ${input.exportResult.fps} | Aspect: ${input.exportResult.aspectRatio}`,
+    `Media Files (${copiedMediaFiles.length}):`,
+    ...copiedMediaFiles.map((f) => `  - ${f}`),
+    '',
+    'Import the timeline file into Final Cut Pro / DaVinci Resolve / Premiere / Jianying with the sibling media/ folder intact.',
+    '',
+  ].join('\n')
+
+  if (containsHostPath(readme) || findPlaintextCredential(readme)) {
+    throw new DramaExportInputError('muweave/unsafe_export_payload', 'Portable bundle README failed sanitization check')
+  }
+  await writeFile(path.join(outDir, 'README.txt'), readme, 'utf8')
+
+  return {
+    ok: true,
+    filename: input.exportResult.filename,
+    format: input.exportResult.format,
+    copiedMediaFiles,
+    readmeFile: 'README.txt',
+  }
 }

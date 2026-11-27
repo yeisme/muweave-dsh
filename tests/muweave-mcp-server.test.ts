@@ -48,10 +48,10 @@ describe('MuWeave MCP Server (local stdio + remote Streamable HTTP)', () => {
       const ping = await server.handleJsonRpc({ jsonrpc: '2.0', id: 3, method: 'ping' })
       expect(ping?.result).toEqual({})
 
-      // tools/list: 14 tools, NEVER exposes job.approve
+      // tools/list: 16 tools, NEVER exposes job.approve
       const toolsRes = await server.handleJsonRpc({ jsonrpc: '2.0', id: 4, method: 'tools/list' })
       const tools = (toolsRes?.result as { tools: Array<{ name: string }> }).tools
-      expect(tools).toHaveLength(14)
+      expect(tools).toHaveLength(16)
       expect(tools.some((t) => /approve/i.test(t.name))).toBe(false)
 
       // tools/call: muweave_drama_shots_list + muweave_drama_review_set + muweave_drama_export + muweave_project_diagnose

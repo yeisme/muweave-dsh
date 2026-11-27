@@ -28,12 +28,14 @@ export class DemoSeedError extends Error {
 export interface SeedDemoWorkspaceOptions {
   force?: boolean
   pluginDataDir?: string
+  episodes?: number
 }
 
 export interface SeedDemoWorkspaceResult {
   ok: true
   projectId: string
   title: string
+  episodeCount: number
   elementCount: number
   shotCount: number
   reviewCount: number
@@ -183,6 +185,56 @@ export async function seedDemoWorkspace(
     mime: 'image/png',
   })
 
+  const episodeCount = typeof options.episodes === 'number' && options.episodes >= 2 ? 2 : 1
+  const ep2Auctra = episodeCount >= 2
+    ? [
+        {
+          kind: 'auctra.scene_card.v1',
+          scene_ref: 'scene_04',
+          episode_ref: 'episode:02',
+          revision: '1',
+          heading: '第四场 · 地铁末班车铜钥匙密室',
+          location: '内景 · 末班地铁车厢 · 冷蓝',
+          story_time: '00:15',
+          goal: '林深与顾岚在末班地铁车厢内核对铜钥匙上的编号',
+          obstacle: '追踪者已登上相邻车厢并切断应急照明',
+          stakes: '若在下一站前无法脱身，两人将被围堵在站台',
+          turn: '钥匙背面暗纹映出下一处钟楼坐标',
+          review_status: 'draft',
+          characters: ['char_lin_shen', 'char_gu_lan'],
+          beats: ['车厢闪烁灯光', '钥匙暗纹特写', '紧急拉闸跳站'],
+        },
+      ]
+    : []
+  const ep2Scaena = episodeCount >= 2
+    ? [
+        {
+          breakdown_ref: 'bd_ep02',
+          episode_ref: 'episode:02',
+          revision: '1',
+          rows: [
+            {
+              scene_ref: 'scene_04',
+              shot_ref: 'ep2_shot_01',
+              order: 1,
+              planned_duration_micros: 3_000_000,
+              cells: { shot_size: '中景 MS', camera: '手持跟拍', action: '末班地铁灯光频闪，林深紧握铜钥匙' },
+              restricted_fields: [],
+            },
+            {
+              scene_ref: 'scene_04',
+              shot_ref: 'ep2_shot_02',
+              order: 2,
+              planned_duration_micros: 2_500_000,
+              cells: { shot_size: '特写 CU', camera: '急推', action: '钥匙背面钟楼坐标在暗光下浮现' },
+              restricted_fields: [],
+            },
+          ],
+        },
+      ]
+    : []
+  const totalShotCount = episodeCount >= 2 ? 8 : 6
+
   const index = await syncBundle({
     workspaceDir,
     runner: OFFLINE_RUNNER,
@@ -307,6 +359,7 @@ export async function seedDemoWorkspace(
           candidate_excerpt: '林深直接将怀表拍在木桌中央，表盖震开滑出一张泛黄车票。',
           rationale_summary: '强化动作冲突节奏，缩短对白铺垫。',
         },
+        ...ep2Auctra,
       ],
       scaena: [
         {
@@ -430,6 +483,7 @@ export async function seedDemoWorkspace(
             { stem_ref: 'rain_bed', role: 'sfx', in_ms: 0, out_ms: 20000 },
           ],
         },
+        ...ep2Scaena,
       ],
     },
   })
@@ -478,8 +532,9 @@ export async function seedDemoWorkspace(
     ok: true,
     projectId,
     title,
+    episodeCount,
     elementCount: index.elements.length,
-    shotCount: 6,
+    shotCount: totalShotCount,
     reviewCount,
     scheduleCount,
     validationOk: validation.ok,

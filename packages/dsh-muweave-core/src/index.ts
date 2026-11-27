@@ -1,6 +1,7 @@
 export * from './protocol'
 export * from './host'
 export * from './drama-review-store'
+export * from './drama-cut-store'
 export * from './drama-export'
 export { seedDemoWorkspace, DemoSeedError, type SeedDemoWorkspaceOptions, type SeedDemoWorkspaceResult } from './demo-seed'
 export {
@@ -36,3 +37,14 @@ export {
   type CapabilityDoctorReportV1,
 } from './capabilities/doctor'
 export { LOCAL_PREVIEW_ADAPTER } from './capabilities/preview-adapter'
+export {
+  CUSTOM_ADAPTERS_SCHEMA,
+  CUSTOM_ADAPTER_PRESETS,
+  CustomAdapterError,
+  CustomAdapterStore,
+  validateAdapterEndpointUrl,
+  toCustomAdapterView,
+  buildCustomCapabilityAdapter,
+  testCustomAdapter,
+  type CustomAdapterTestResultV1,
+} from './capabilities/custom-adapters'

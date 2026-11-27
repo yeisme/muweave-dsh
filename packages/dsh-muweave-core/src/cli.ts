@@ -2,14 +2,17 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { renderAgentOutput, stripHostPaths } from '@yeisme/muweave-bundle'
+import { readBundleManifestFromDisk, renderAgentOutput, stripHostPaths } from '@yeisme/muweave-bundle'
 import { runCapabilityDoctor } from './capabilities/doctor'
 import type { CapabilityCatalogV1 } from './capability-protocol'
 import { DemoSeedError, seedDemoWorkspace } from './demo-seed'
+import { exportDramaPortableBundle } from './drama-export'
 import { createLocalMcpBridge, createMuweaveMcpServer, createRemoteMcpBridge, runStdioMcpServer } from './mcp/server'
 import { startMuweaveMcpHttpServer } from './mcp/http'
 import type {
+  CustomAdapterViewV1,
   DramaExportResultV1,
+  EpisodeCutOverrideV1,
   ProjectMigrationReportV1,
   ShotReviewBatchResultV1,
   ShotReviewRecordV1,
@@ -21,7 +24,7 @@ interface ParsedArgs {
   flags: Record<string, string | boolean>
 }
 
-const BOOLEAN_FLAGS = new Set(['json', 'agent', 'force', 'help', 'h', 'capabilities'])
+const BOOLEAN_FLAGS = new Set(['json', 'agent', 'force', 'help', 'h', 'capabilities', 'allow-private', 'restore'])
 
 function parseArgv(argv: readonly string[]): ParsedArgs {
   const positional: string[] = []
@@ -72,7 +75,16 @@ Usage:
   muweave shots list [--scene <ref>] [--status <status>] [--missing <role>]
   muweave review set <shotRef> --status <status> [--note <text>] [--tags a,b] [--expected-revision <n>]
   muweave review batch (--file <path> | --items <json>)
-  muweave export <cut_manifest_v1|cmx3600_edl|shotlist_csv> [--fps 24|25|30] [--aspect 9:16] [--out <file>]
+  muweave export <cut_manifest_v1|cmx3600_edl|shotlist_csv|fcpxml_1_10|jianying_draft_v1> [--episode <ref>] [--fps 24|25|30] [--aspect 9:16] [--out <file>] [--bundle-dir <dir>]
+  muweave cut show [--episode <ref>]
+  muweave cut reorder <episodeRef> <shot1,shot2,...>
+  muweave cut trim <episodeRef> <shotRef> <seconds>
+  muweave cut omit <episodeRef> <shotRef> [--restore]
+  muweave cut reset <episodeRef>
+  muweave adapters list
+  muweave adapters add <adapterId> --protocol <openai_http|comfyui_http|cli_wrapper> --title <text> --kind <image|voice|video|sfx|music> [--endpoint <url>] [--binary <bin>] [--model <name>] [--auth-env <ENV_VAR>] [--price <usd>] [--allow-private]
+  muweave adapters remove <adapterId>
+  muweave adapters test <adapterId>
   muweave schedule list
   muweave schedule plan <ref> <YYYY-MM-DD> [--label <text>] [--kind <kind>] [--note <text>] [--project <id>]
   muweave schedule clear <ref>
@@ -85,7 +97,7 @@ Usage:
   muweave tasks list
   muweave tasks trace <taskId>
   muweave tasks cancel <taskId>
-  muweave demo [seed] [--force]
+  muweave demo [seed] [--force] [--episodes 1|2]
   muweave mcp [--transport stdio|http] [--host 127.0.0.1] [--port 3741] [--auth-token <tok>] [--host-url <url>]
 
 Global flags:
@@ -157,6 +169,7 @@ export async function runMuweaveCli(
       const result = await seedDemoWorkspace(workspaceDir, {
         force: flags.force === true,
         pluginDataDir,
+        episodes: numFlag(flags, 'episodes'),
       })
       return emit(
         'demo.seed',
@@ -317,14 +330,39 @@ export async function runMuweaveCli(
       const format = sub ?? 'cut_manifest_v1'
       const fps = numFlag(flags, 'fps')
       const aspectRatio = strFlag(flags, 'aspect')
+      const episodeRef = strFlag(flags, 'episode')
       const outPath = strFlag(flags, 'out')
+      const bundleDir = strFlag(flags, 'bundle-dir')
       const res = await bridge.call('drama.export.manifest', {
         format,
+        ...(episodeRef ? { episodeRef } : {}),
         ...(fps !== undefined ? { fps } : {}),
         ...(aspectRatio ? { aspectRatio } : {}),
       })
       if (!res.ok) return emitError('export', res.error.code, res.error.message)
       const result = res.data as DramaExportResultV1
+      if (bundleDir) {
+        const manifest = await readBundleManifestFromDisk(workspaceDir)
+        const mediaBlobs = manifest.bindings.shotMedia
+          .filter((m) => Boolean(m.sha256) && (!episodeRef || !m.episodeRef || m.episodeRef === episodeRef))
+          .map((m) => ({ sha256: m.sha256!, ...(m.mime ? { mime: m.mime } : {}) }))
+        const bundleRes = await exportDramaPortableBundle({
+          workspaceDir,
+          exportResult: result,
+          bundleDir,
+          mediaBlobs,
+        })
+        return emit(
+          'export.bundle',
+          {
+            ...bundleRes,
+            shotCount: result.shotCount,
+            totalDurationMs: result.totalDurationMs,
+            fps: result.fps,
+          },
+          `Exported portable ${result.format} bundle (${result.shotCount} shots, ${bundleRes.copiedMediaFiles.length} media files) to ${path.basename(bundleDir)}`,
+        )
+      }
       if (outPath) {
         await writeFile(path.resolve(outPath), result.content, 'utf8')
         return emit(
@@ -341,6 +379,99 @@ export async function runMuweaveCli(
         )
       }
       return emit('export', result as unknown as Record<string, unknown>, result.content)
+    }
+
+    if (cmd === 'adapters') {
+      if (!sub || sub === 'list') {
+        const res = await bridge.call('adapter.custom.list', {})
+        if (!res.ok) return emitError('adapters.list', res.error.code, res.error.message)
+        const data = res.data as { adapters: CustomAdapterViewV1[]; presets: unknown[] }
+        const human = data.adapters.length
+          ? data.adapters.map((a) => `${a.adapterId} (${a.protocol}/${a.kind}) enabled=${a.enabled} envReady=${a.envReady}`).join('\n')
+          : 'No custom adapters registered.'
+        return emit('adapters.list', data as unknown as Record<string, unknown>, human)
+      }
+      if (sub === 'add') {
+        const adapterId = positional[2] ?? ''
+        const res = await bridge.call('adapter.custom.save', {
+          adapterId,
+          title: strFlag(flags, 'title') ?? adapterId,
+          protocol: strFlag(flags, 'protocol') ?? 'openai_http',
+          kind: strFlag(flags, 'kind') ?? 'image',
+          ...(strFlag(flags, 'stage') ? { stage: strFlag(flags, 'stage') } : {}),
+          ...(strFlag(flags, 'endpoint') ? { endpointUrl: strFlag(flags, 'endpoint') } : {}),
+          ...(strFlag(flags, 'binary') ? { binary: strFlag(flags, 'binary') } : {}),
+          ...(strFlag(flags, 'model') ? { model: strFlag(flags, 'model') } : {}),
+          ...(strFlag(flags, 'auth-env') ? { authEnvVar: strFlag(flags, 'auth-env') } : {}),
+          ...(numFlag(flags, 'price') !== undefined ? { unitPriceUsd: numFlag(flags, 'price') } : {}),
+          allowPrivateNetwork: flags['allow-private'] === true,
+          enabled: true,
+        })
+        if (!res.ok) return emitError('adapters.add', res.error.code, res.error.message)
+        const adapter = (res.data as { adapter: CustomAdapterViewV1 }).adapter
+        return emit('adapters.add', { adapter }, `Saved custom adapter ${adapter.adapterId} (envReady=${adapter.envReady})`)
+      }
+      if (sub === 'remove') {
+        const adapterId = positional[2] ?? ''
+        const res = await bridge.call('adapter.custom.remove', { adapterId })
+        if (!res.ok) return emitError('adapters.remove', res.error.code, res.error.message)
+        return emit('adapters.remove', res.data as Record<string, unknown>, `Removed custom adapter ${adapterId}`)
+      }
+      if (sub === 'test') {
+        const adapterId = positional[2] ?? ''
+        const res = await bridge.call('adapter.custom.test', { adapterId })
+        if (!res.ok) return emitError('adapters.test', res.error.code, res.error.message)
+        const r = res.data as { ok: boolean; adapterId: string; message: string }
+        return emit('adapters.test', res.data as Record<string, unknown>, `[${r.ok ? 'OK' : 'FAIL'}] ${r.adapterId}: ${r.message}`, r.ok)
+      }
+      return emitError('adapters', 'muweave/unknown_subcommand', `Unknown adapters subcommand: ${sub}`)
+    }
+
+    if (cmd === 'cut') {
+      if (!sub || sub === 'show') {
+        const episodeRef = strFlag(flags, 'episode')
+        const res = await bridge.call('drama.cut.get', episodeRef ? { episodeRef } : {})
+        if (!res.ok) return emitError('cut.show', res.error.code, res.error.message)
+        return emit('cut.show', res.data as Record<string, unknown>, JSON.stringify(res.data, null, 2))
+      }
+      if (sub === 'reset') {
+        const episodeRef = positional[2] ?? ''
+        const res = await bridge.call('drama.cut.reset', { episodeRef })
+        if (!res.ok) return emitError('cut.reset', res.error.code, res.error.message)
+        return emit('cut.reset', res.data as Record<string, unknown>, `Reset cut override for ${episodeRef}`)
+      }
+      if (sub === 'reorder' || sub === 'trim' || sub === 'omit') {
+        const episodeRef = positional[2] ?? ''
+        const existingRes = await bridge.call('drama.cut.get', { episodeRef })
+        const prev = existingRes.ok ? (existingRes.data as { cut: EpisodeCutOverrideV1 | null }).cut : null
+        const nextPayload: Record<string, unknown> = {
+          episodeRef,
+          expectedRevision: prev?.revision ?? 0,
+        }
+        if (sub === 'reorder') {
+          const orderCsv = positional[3] ?? ''
+          nextPayload.shotOrder = orderCsv.split(',').map((s) => s.trim()).filter(Boolean)
+        } else if (sub === 'trim') {
+          const shotRef = positional[3] ?? ''
+          const sec = Number(positional[4] ?? '')
+          const micros = Math.round(sec * 1_000_000)
+          nextPayload.durationOverridesMicros = {
+            ...(prev?.durationOverridesMicros ?? {}),
+            [shotRef]: micros,
+          }
+        } else if (sub === 'omit') {
+          const shotRef = positional[3] ?? ''
+          const omitted = new Set(prev?.omittedShotRefs ?? [])
+          if (flags.restore === true) omitted.delete(shotRef)
+          else omitted.add(shotRef)
+          nextPayload.omittedShotRefs = [...omitted]
+        }
+        const res = await bridge.call('drama.cut.set', nextPayload)
+        if (!res.ok) return emitError(`cut.${sub}`, res.error.code, res.error.message)
+        const cut = (res.data as { cut: EpisodeCutOverrideV1 }).cut
+        return emit(`cut.${sub}`, { cut }, `Updated cut for ${cut.episodeRef} (rev ${cut.revision})`)
+      }
+      return emitError('cut', 'muweave/unknown_subcommand', `Unknown cut subcommand: ${sub}`)
     }
 
     if (cmd === 'schedule') {

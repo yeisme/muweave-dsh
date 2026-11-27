@@ -22,16 +22,27 @@ export function findAdapter(capabilityId: string): CapabilityAdapter | undefined
 export class CapabilityRegistry {
   private readonly probes = new Map<string, Promise<boolean>>()
 
-  constructor(private readonly adapters: readonly CapabilityAdapter[] = CAPABILITY_ADAPTERS) {}
+  constructor(
+    private readonly adapters: readonly CapabilityAdapter[] = CAPABILITY_ADAPTERS,
+    private readonly dynamicSource?: () => readonly CapabilityAdapter[],
+  ) {}
 
   private activeAdapters(): readonly CapabilityAdapter[] {
+    const out: CapabilityAdapter[] = [...this.adapters]
     if (
       localPreviewEnabled() &&
-      !this.adapters.some((a) => a.descriptor.capabilityId === LOCAL_PREVIEW_ADAPTER.descriptor.capabilityId)
+      !out.some((a) => a.descriptor.capabilityId === LOCAL_PREVIEW_ADAPTER.descriptor.capabilityId)
     ) {
-      return [...this.adapters, LOCAL_PREVIEW_ADAPTER]
+      out.push(LOCAL_PREVIEW_ADAPTER)
     }
-    return this.adapters
+    if (this.dynamicSource) {
+      for (const dyn of this.dynamicSource()) {
+        if (!out.some((a) => a.descriptor.capabilityId === dyn.descriptor.capabilityId)) {
+          out.push(dyn)
+        }
+      }
+    }
+    return out
   }
 
   find(capabilityId: string): CapabilityAdapter | undefined {

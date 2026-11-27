@@ -220,13 +220,17 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'muweave_drama_export',
-    description: 'Compile a sanitized rough-cut export package (cut_manifest_v1, cmx3600_edl, or shotlist_csv).',
+    description: 'Compile a sanitized rough-cut export package (cut_manifest_v1, cmx3600_edl, shotlist_csv, fcpxml_1_10, or jianying_draft_v1).',
     inputSchema: {
       type: 'object',
       required: ['format'],
       properties: {
         workspaceId: { type: 'string' },
-        format: { type: 'string', enum: ['cut_manifest_v1', 'cmx3600_edl', 'shotlist_csv'] },
+        episodeRef: { type: 'string' },
+        format: {
+          type: 'string',
+          enum: ['cut_manifest_v1', 'cmx3600_edl', 'shotlist_csv', 'fcpxml_1_10', 'jianying_draft_v1'],
+        },
         fps: { type: 'integer', enum: [24, 25, 30] },
         aspectRatio: { type: 'string' },
       },
@@ -305,6 +309,37 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
       properties: {
         action: { type: 'string', enum: ['trace', 'cancel'] },
         taskId: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'muweave_adapters_manage',
+    description: 'List, save, remove, or zero-cost test custom engine bridge adapters (env var names only, zero plaintext secrets).',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['list', 'save', 'remove', 'test'] },
+        adapterId: { type: 'string' },
+        adapter: { type: 'object' },
+      },
+    },
+  },
+  {
+    name: 'muweave_drama_cut_manage',
+    description: 'Get, set (optimistic-locked), or reset non-destructive episode cut overrides (shot order, omissions, durations, transitions).',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['get', 'set', 'reset'] },
+        workspaceId: { type: 'string' },
+        episodeRef: { type: 'string' },
+        shotOrder: { type: 'array', items: { type: 'string' } },
+        omittedShotRefs: { type: 'array', items: { type: 'string' } },
+        durationOverridesMicros: { type: 'object' },
+        transitions: { type: 'object' },
+        expectedRevision: { type: 'integer' },
       },
     },
   },
@@ -511,6 +546,7 @@ export function createMuweaveMcpServer(options: CreateMuweaveMcpServerOptions = 
       case 'muweave_drama_export': {
         const res = await bridge.call('drama.export.manifest', {
           ...(typeof args.workspaceId === 'string' ? { workspaceId: args.workspaceId } : {}),
+          ...(typeof args.episodeRef === 'string' ? { episodeRef: args.episodeRef } : {}),
           format: args.format as DramaExportFormat,
           ...(typeof args.fps === 'number' ? { fps: args.fps } : {}),
           ...(typeof args.aspectRatio === 'string' ? { aspectRatio: args.aspectRatio } : {}),
@@ -607,6 +643,28 @@ export function createMuweaveMcpServer(options: CreateMuweaveMcpServerOptions = 
         }
         const rpcAction = op === 'cancel' ? 'task.cancel' : 'task.trace'
         const res = await bridge.call(rpcAction, { taskId })
+        return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
+      }
+
+      case 'muweave_adapters_manage': {
+        const op = String(args.action ?? 'list')
+        const rpcAction =
+          op === 'save'
+            ? 'adapter.custom.save'
+            : op === 'remove'
+              ? 'adapter.custom.remove'
+              : op === 'test'
+                ? 'adapter.custom.test'
+                : 'adapter.custom.list'
+        const res = await bridge.call(rpcAction, args)
+        return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
+      }
+
+      case 'muweave_drama_cut_manage': {
+        const op = String(args.action ?? 'get')
+        const rpcAction =
+          op === 'set' ? 'drama.cut.set' : op === 'reset' ? 'drama.cut.reset' : 'drama.cut.get'
+        const res = await bridge.call(rpcAction, args)
         return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
       }
 

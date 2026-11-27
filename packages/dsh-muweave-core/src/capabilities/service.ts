@@ -17,7 +17,8 @@ import {
 } from '../capability-protocol'
 import { JobEngine, JobError, nextActionOf } from '../jobs'
 import { rpcFail, rpcOk, type RpcEnvelope } from '../protocol'
-import { CapabilityRegistry } from './registry'
+import { CapabilityRegistry, CAPABILITY_ADAPTERS } from './registry'
+import { buildCustomCapabilityAdapter, type CustomAdapterStore } from './custom-adapters'
 import { computeBudget, readSettings } from './settings'
 import { deriveTitle, promptDigestOf, type AdapterContext, type CapabilityInput } from './types'
 
@@ -35,6 +36,8 @@ export interface CapabilityServiceDeps {
   env?: NodeJS.ProcessEnv
   pollIntervalMs?: number
   logger?: (event: string, fields: Record<string, unknown>) => void
+  customAdapters?: CustomAdapterStore
+  fetchImpl?: typeof globalThis.fetch
 }
 
 class InputError extends Error {}
@@ -93,7 +96,7 @@ function cleanCost(raw: unknown): CostAmountV1 {
 }
 
 export class CapabilityService {
-  readonly registry = new CapabilityRegistry()
+  readonly registry: CapabilityRegistry
   readonly engine: JobEngine
   /** One global lock around budget check -> queued transition, so two approvals cannot both pass the cap. */
   private budgetTail: Promise<void> = Promise.resolve()
@@ -101,6 +104,16 @@ export class CapabilityService {
   private readonly persistedEstimateDigests = new Map<string, PersistedEstimateDigestV1>()
 
   constructor(private readonly deps: CapabilityServiceDeps) {
+    this.registry = new CapabilityRegistry(
+      CAPABILITY_ADAPTERS,
+      deps.customAdapters
+        ? () =>
+            deps.customAdapters!
+              .allConfigs()
+              .filter((c) => c.enabled)
+              .map((c) => buildCustomCapabilityAdapter(c, deps.fetchImpl, deps.env))
+        : undefined,
+    )
     this.loadEstimateDigests()
     this.engine = new JobEngine({
       file: path.join(deps.pluginDataDir, 'jobs.v1.json'),
