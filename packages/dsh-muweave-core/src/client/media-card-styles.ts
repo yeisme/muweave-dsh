@@ -19,7 +19,7 @@ export const mediaCardStyles = `
   width: 100%;
   min-height: 3.5rem;
   padding: var(--mw-s-3, 0.75rem);
-  color: var(--mw-label-2, #555);
+  color: var(--mw-label-2);
   font-size: 0.75rem;
   text-align: center;
 }
@@ -41,6 +41,10 @@ export const mediaCardStyles = `
   transition: transform 180ms var(--mw-ease-out);
 }
 
+.mw-media-card:not(:has(.mw-media-card-media > .mw-media-thumbnail)) .mw-media-ready-action {
+  display: none;
+}
+
 .mw-media-card-badges {
   display: flex;
   flex-wrap: wrap;
@@ -49,7 +53,7 @@ export const mediaCardStyles = `
 }
 
 .mw-media-card[data-selected="true"] {
-  outline: 2px solid var(--mw-accent);
+  outline: 2px solid var(--mw-line-strong);
   outline-offset: -2px;
 }
 

@@ -69,11 +69,13 @@ function CompareSideCard({
   lang,
   side,
   subject,
+  onClose,
 }: {
   rpc: MuweaveRpcClient
   lang: string
   side: 'current' | 'compare'
   subject?: CompareSubject
+  onClose: () => void
 }) {
   const en = lang === 'en'
   const role =
@@ -81,9 +83,7 @@ function CompareSideCard({
   const time = shortTime(subject?.updatedAt)
   return (
     <figure className="mw-compare-side" data-compare-side={side}>
-      <StageThumb rpc={rpc} sha256={subject?.sha256} alt={subject?.title ?? role} shape="compare">
-        {subject?.sha256 ? null : <span className="mw-stage-thumb-note">{en ? 'No image' : '暂无图像'}</span>}
-      </StageThumb>
+      <StageThumb rpc={rpc} sha256={subject?.sha256} alt={subject?.title ?? role} shape="compare" fallback={{ label: '返回产物', onAction: onClose }} />
       <figcaption className="mw-compare-meta">
         <span className="mw-compare-role">
           {role}
@@ -162,8 +162,8 @@ export function ComparePane({ rpc, lang, current, compare, onClose }: ComparePan
       </header>
       {compare ? (
         <div className="mw-compare-grid">
-          <CompareSideCard rpc={rpc} lang={lang} side="current" subject={current} />
-          <CompareSideCard rpc={rpc} lang={lang} side="compare" subject={compare} />
+          <CompareSideCard rpc={rpc} lang={lang} side="current" subject={current} onClose={close} />
+          <CompareSideCard rpc={rpc} lang={lang} side="compare" subject={compare} onClose={close} />
         </div>
       ) : (
         <p className="mw-compare-empty" data-compare-empty="true">
