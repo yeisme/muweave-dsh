@@ -220,7 +220,7 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'muweave_drama_export',
-    description: 'Compile a sanitized rough-cut export package (cut_manifest_v1, cmx3600_edl, shotlist_csv, fcpxml_1_10, or jianying_draft_v1).',
+    description: 'Compile a sanitized rough-cut, subtitle, or offline review deck export package.',
     inputSchema: {
       type: 'object',
       required: ['format'],
@@ -229,7 +229,16 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
         episodeRef: { type: 'string' },
         format: {
           type: 'string',
-          enum: ['cut_manifest_v1', 'cmx3600_edl', 'shotlist_csv', 'fcpxml_1_10', 'jianying_draft_v1'],
+          enum: [
+            'cut_manifest_v1',
+            'cmx3600_edl',
+            'shotlist_csv',
+            'fcpxml_1_10',
+            'jianying_draft_v1',
+            'srt_subtitles',
+            'webvtt_subtitles',
+            'review_deck_html',
+          ],
         },
         fps: { type: 'integer', enum: [24, 25, 30] },
         aspectRatio: { type: 'string' },
@@ -343,6 +352,36 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
       },
     },
   },
+  {
+    name: 'muweave_project_bible',
+    description: 'Read or update the workspace Continuity Bible (visual grammar, color palette, character anchors, guardrails, compliance disclosure).',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['get', 'set'] },
+        workspaceId: { type: 'string' },
+        projectTitle: { type: 'string' },
+        visualGrammar: { type: 'object' },
+        colorPalette: { type: 'array', items: { type: 'object' } },
+        characterAnchors: { type: 'array', items: { type: 'object' } },
+        negativeGuardrails: { type: 'array', items: { type: 'string' } },
+        complianceDisclosure: { type: 'string' },
+        expectedRevision: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'muweave_drama_qc_report',
+    description: 'Run the zero-cost automated Episode QC Gate (opening hook, media/lip-sync, 4-axis assets, review gate, compliance disclosure).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workspaceId: { type: 'string' },
+        episodeRef: { type: 'string' },
+      },
+    },
+  },
 ]
 
 export const MCP_RESOURCES: readonly McpResourceDefinition[] = [
@@ -380,6 +419,18 @@ export const MCP_RESOURCES: readonly McpResourceDefinition[] = [
     uri: 'muweave://orchestration/tasks',
     name: 'Orchestration Bots & Tasks',
     description: 'Bot roster states, circuit-breaker counts, and active/orphaned orchestration tasks.',
+    mimeType: 'application/json',
+  },
+  {
+    uri: 'muweave://project/bible',
+    name: 'Project Continuity Bible',
+    description: 'Workspace visual grammar, color palette, character anchors, guardrails, and compliance disclosure.',
+    mimeType: 'application/json',
+  },
+  {
+    uri: 'muweave://drama/qc',
+    name: 'Episode QC Gate Report',
+    description: 'Automated zero-cost Episode QC report across pacing, media/lip-sync, assets, reviews, and compliance.',
     mimeType: 'application/json',
   },
 ]
@@ -668,6 +719,18 @@ export function createMuweaveMcpServer(options: CreateMuweaveMcpServerOptions = 
         return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
       }
 
+      case 'muweave_project_bible': {
+        const op = String(args.action ?? 'get')
+        const rpcAction = op === 'set' ? 'project.bible.set' : 'project.bible.get'
+        const res = await bridge.call(rpcAction, args)
+        return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
+      }
+
+      case 'muweave_drama_qc_report': {
+        const res = await bridge.call('drama.qc.report', args)
+        return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
+      }
+
       default:
         return null
     }
@@ -727,6 +790,16 @@ export function createMuweaveMcpServer(options: CreateMuweaveMcpServerOptions = 
           orphanedCount: taskData.orphanedCount ?? 0,
           tasks: taskData.tasks ?? [],
         })
+        return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] }
+      }
+      case 'muweave://project/bible': {
+        const res = await bridge.call('project.bible.get', {})
+        const body = sanitizeOutput(res.ok ? res.data : { error: res.error })
+        return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] }
+      }
+      case 'muweave://drama/qc': {
+        const res = await bridge.call('drama.qc.report', {})
+        const body = sanitizeOutput(res.ok ? res.data : { error: res.error })
         return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] }
       }
       default:

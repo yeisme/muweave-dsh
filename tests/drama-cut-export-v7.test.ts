@@ -164,16 +164,16 @@ describe('v7 DramaCutStore, Multi-Episode Export (FCPXML 1.10 / Jianying Draft) 
       expect(seeded.shotCount).toBe(8)
 
       // CLI cut reorder + omit + trim
-      const reord = await execCli(['cut', 'reorder', 'ep_01', 'shot_02,shot_01', ...baseFlags, '--json'])
+      const reord = await execCli(['cut', 'reorder', 'episode:01', 'shot_02,shot_01', ...baseFlags, '--json'])
       expect(reord.code).toBe(0)
-      const trim = await execCli(['cut', 'trim', 'ep_01', 'shot_02', '4.5', ...baseFlags, '--json'])
+      const trim = await execCli(['cut', 'trim', 'episode:01', 'shot_02', '4.5', ...baseFlags, '--json'])
       expect(trim.code).toBe(0)
-      const omit = await execCli(['cut', 'omit', 'ep_01', 'shot_06', ...baseFlags, '--json'])
+      const omit = await execCli(['cut', 'omit', 'episode:01', 'shot_06', ...baseFlags, '--json'])
       expect(omit.code).toBe(0)
 
-      // CLI export fcpxml_1_10 --episode ep_01 --bundle-dir
+      // CLI export fcpxml_1_10 --episode episode:01 --bundle-dir
       const exp = await execCli([
-        'export', 'fcpxml_1_10', '--episode', 'ep_01', '--bundle-dir', bundleDir, ...baseFlags, '--json',
+        'export', 'fcpxml_1_10', '--episode', 'episode:01', '--bundle-dir', bundleDir, ...baseFlags, '--json',
       ])
       expect(exp.code).toBe(0)
       const expJson = JSON.parse(exp.stdout) as { ok: boolean; shotCount: number; copiedMediaFiles: string[]; filename: string }
@@ -195,7 +195,7 @@ describe('v7 DramaCutStore, Multi-Episode Export (FCPXML 1.10 / Jianying Draft) 
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
-        params: { name: 'muweave_drama_cut_manage', arguments: { action: 'get', episodeRef: 'ep_01' } },
+        params: { name: 'muweave_drama_cut_manage', arguments: { action: 'get', episodeRef: 'episode:01' } },
       })
       const getCutText = (getCut?.result as { content: Array<{ text: string }> }).content[0]!.text
       expect(JSON.parse(getCutText).cut.omittedShotRefs).toEqual(['shot_06'])

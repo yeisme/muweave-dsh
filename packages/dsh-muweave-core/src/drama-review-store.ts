@@ -5,6 +5,9 @@ import { containsHostPath, findPlaintextCredential } from '@yeisme/muweave-bundl
 import type {
   ShotReviewBatchItemResultV1,
   ShotReviewBatchResultV1,
+  ShotReviewImportEntryResultV1,
+  ShotReviewImportItemV1,
+  ShotReviewImportResultV1,
   ShotReviewRecordV1,
   ShotReviewSetInputV1,
   ShotReviewStatus,
@@ -260,6 +263,75 @@ export class DramaReviewStore {
       this.persist()
     }
     return { results, succeededCount, failedCount }
+  }
+
+  /**
+   * Import external client review feedback (`review-feedback.json`).
+   * Validates credentials/host paths/status and SKIPS currently `locked` shots unless `allowLocked === true`.
+   */
+  importFeedback(
+    workspaceId: string,
+    items: readonly ShotReviewImportItemV1[],
+    options: { allowLocked?: boolean } = {},
+  ): ShotReviewImportResultV1 {
+    const wsId = requireSafeRef(workspaceId, 'workspaceId')
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new DramaReviewInputError('muweave/invalid_review_input', 'items must be a non-empty array')
+    }
+    if (items.length > 500) {
+      throw new DramaReviewInputError('muweave/invalid_review_input', 'items must contain at most 500 entries')
+    }
+    const allowLocked = options.allowLocked === true
+    const results: ShotReviewImportEntryResultV1[] = []
+    let importedCount = 0
+    let skippedLockedCount = 0
+    let invalidCount = 0
+
+    for (const rawItem of items) {
+      const item = (typeof rawItem === 'object' && rawItem !== null ? rawItem : {}) as Partial<ShotReviewImportItemV1>
+      const rawShotRef = typeof item.shotRef === 'string' ? item.shotRef.trim() : ''
+      try {
+        const shotRef = requireSafeRef(item.shotRef, 'shotRef')
+        if (!isValidShotReviewStatus(item.status)) {
+          throw new DramaReviewInputError('muweave/invalid_review_input', 'Invalid review status')
+        }
+        const existing = this.records.find((r) => r.workspaceId === wsId && r.shotRef === shotRef)
+        if (existing?.status === 'locked' && !allowLocked) {
+          skippedLockedCount += 1
+          results.push({
+            shotRef,
+            action: 'skipped_locked',
+            status: existing.status,
+            reason: 'locked_by_director',
+          })
+          continue
+        }
+        const updated = this.applyOne(wsId, {
+          shotRef,
+          status: item.status,
+          ...(item.note !== undefined ? { note: item.note } : {}),
+          ...(item.tags !== undefined ? { tags: item.tags } : {}),
+        })
+        importedCount += 1
+        results.push({
+          shotRef: updated.shotRef,
+          action: 'imported',
+          status: updated.status,
+        })
+      } catch (err) {
+        invalidCount += 1
+        results.push({
+          shotRef: rawShotRef,
+          action: 'invalid',
+          reason: err instanceof DramaReviewInputError ? err.code : 'muweave/invalid_review_input',
+        })
+      }
+    }
+
+    if (importedCount > 0) {
+      this.persist()
+    }
+    return { importedCount, skippedLockedCount, invalidCount, results }
   }
 
   private applyOne(wsId: string, input: ShotReviewSetInputV1): ShotReviewRecordV1 {

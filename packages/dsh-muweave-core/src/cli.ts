@@ -10,11 +10,14 @@ import { exportDramaPortableBundle } from './drama-export'
 import { createLocalMcpBridge, createMuweaveMcpServer, createRemoteMcpBridge, runStdioMcpServer } from './mcp/server'
 import { startMuweaveMcpHttpServer } from './mcp/http'
 import type {
+  ContinuityBibleV1,
   CustomAdapterViewV1,
   DramaExportResultV1,
   EpisodeCutOverrideV1,
+  EpisodeQcReportV1,
   ProjectMigrationReportV1,
   ShotReviewBatchResultV1,
+  ShotReviewImportResultV1,
   ShotReviewRecordV1,
   WorkspaceSummaryView,
 } from './protocol'
@@ -24,7 +27,7 @@ interface ParsedArgs {
   flags: Record<string, string | boolean>
 }
 
-const BOOLEAN_FLAGS = new Set(['json', 'agent', 'force', 'help', 'h', 'capabilities', 'allow-private', 'restore'])
+const BOOLEAN_FLAGS = new Set(['json', 'agent', 'force', 'help', 'h', 'capabilities', 'allow-private', 'restore', 'strict', 'allow-locked'])
 
 function parseArgv(argv: readonly string[]): ParsedArgs {
   const positional: string[] = []
@@ -75,7 +78,11 @@ Usage:
   muweave shots list [--scene <ref>] [--status <status>] [--missing <role>]
   muweave review set <shotRef> --status <status> [--note <text>] [--tags a,b] [--expected-revision <n>]
   muweave review batch (--file <path> | --items <json>)
-  muweave export <cut_manifest_v1|cmx3600_edl|shotlist_csv|fcpxml_1_10|jianying_draft_v1> [--episode <ref>] [--fps 24|25|30] [--aspect 9:16] [--out <file>] [--bundle-dir <dir>]
+  muweave review import <file.json> [--allow-locked]
+  muweave export <cut_manifest_v1|cmx3600_edl|shotlist_csv|fcpxml_1_10|jianying_draft_v1|srt_subtitles|webvtt_subtitles|review_deck_html> [--episode <ref>] [--fps 24|25|30] [--aspect 9:16] [--out <file>] [--bundle-dir <dir>]
+  muweave bible show
+  muweave bible set [--title <text>] [--aspect <ratio>] [--lens <text>] [--lighting <text>] [--style <text>] [--disclosure <text>] [--guardrails a,b] [--expected-revision <rev>]
+  muweave qc [--episode <ref>] [--strict]
   muweave cut show [--episode <ref>]
   muweave cut reorder <episodeRef> <shot1,shot2,...>
   muweave cut trim <episodeRef> <shotRef> <seconds>
@@ -326,6 +333,72 @@ export async function runMuweaveCli(
       )
     }
 
+    if (cmd === 'review' && sub === 'import') {
+      const fileArg = positional[2] ?? strFlag(flags, 'file')
+      if (!fileArg) return emitError('review.import', 'muweave/missing_file', 'Provide a review-feedback.json file path')
+      const raw = JSON.parse(await readFile(path.resolve(fileArg), 'utf8')) as unknown
+      const items = Array.isArray(raw) ? raw : (raw as { items?: unknown }).items
+      const res = await bridge.call('drama.shot.review.import', {
+        items,
+        allowLocked: flags['allow-locked'] === true,
+      })
+      if (!res.ok) return emitError('review.import', res.error.code, res.error.message)
+      const data = res.data as ShotReviewImportResultV1
+      return emit(
+        'review.import',
+        data as unknown as Record<string, unknown>,
+        `Imported ${data.importedCount} review(s), skipped ${data.skippedLockedCount} locked, ${data.invalidCount} invalid.`,
+      )
+    }
+
+    if (cmd === 'bible') {
+      if (!sub || sub === 'show') {
+        const res = await bridge.call('project.bible.get', {})
+        if (!res.ok) return emitError('bible.show', res.error.code, res.error.message)
+        const bible = (res.data as { bible: ContinuityBibleV1 }).bible
+        const human = [
+          `Continuity Bible (rev ${bible.revision}) — ${bible.projectTitle ?? bible.workspaceId}`,
+          `Visual: ${bible.visualGrammar.aspectRatio} | ${bible.visualGrammar.lensStyle}`,
+          `Disclosure: ${bible.complianceDisclosure || '(not set)'}`,
+          `Palette: ${bible.colorPalette.length} swatch(es) | Anchors: ${bible.characterAnchors.length} | Guardrails: ${bible.negativeGuardrails.length}`,
+        ].join('\n')
+        return emit('bible.show', { bible }, human)
+      }
+      if (sub === 'set') {
+        const vg: Record<string, string> = {}
+        if (strFlag(flags, 'aspect')) vg.aspectRatio = strFlag(flags, 'aspect')!
+        if (strFlag(flags, 'lens')) vg.lensStyle = strFlag(flags, 'lens')!
+        if (strFlag(flags, 'lighting')) vg.lightingRule = strFlag(flags, 'lighting')!
+        if (strFlag(flags, 'style')) vg.styleDirective = strFlag(flags, 'style')!
+        const guardrailsRaw = strFlag(flags, 'guardrails')
+        const res = await bridge.call('project.bible.set', {
+          ...(strFlag(flags, 'title') ? { projectTitle: strFlag(flags, 'title') } : {}),
+          ...(Object.keys(vg).length ? { visualGrammar: vg } : {}),
+          ...(strFlag(flags, 'disclosure') !== undefined ? { complianceDisclosure: strFlag(flags, 'disclosure') } : {}),
+          ...(guardrailsRaw ? { negativeGuardrails: guardrailsRaw.split(',').map((s) => s.trim()).filter(Boolean) } : {}),
+          ...(strFlag(flags, 'expected-revision') ? { expectedRevision: strFlag(flags, 'expected-revision') } : {}),
+        })
+        if (!res.ok) return emitError('bible.set', res.error.code, res.error.message)
+        const bible = (res.data as { bible: ContinuityBibleV1 }).bible
+        return emit('bible.set', { bible }, `Saved Continuity Bible (rev ${bible.revision})`)
+      }
+      return emitError('bible', 'muweave/unknown_subcommand', `Unknown bible subcommand: ${sub}`)
+    }
+
+    if (cmd === 'qc') {
+      const episodeRef = strFlag(flags, 'episode')
+      const strict = flags.strict === true
+      const res = await bridge.call('drama.qc.report', episodeRef ? { episodeRef } : {})
+      if (!res.ok) return emitError('qc', res.error.code, res.error.message)
+      const report = res.data as EpisodeQcReportV1
+      const human = [
+        `Episode QC Report — score=${report.score}/100, readyForDelivery=${report.readyForDelivery} (blockers=${report.counts.blocker}, warnings=${report.counts.warning}, pass=${report.counts.pass})`,
+        ...report.findings.map((f) => `  [${f.severity.toUpperCase()}] ${f.code}${f.shotRef ? ` (${f.shotRef})` : ''}: ${f.message}`),
+      ].join('\n')
+      const ok = !strict || report.readyForDelivery
+      return emit('qc', report as unknown as Record<string, unknown>, human, ok)
+    }
+
     if (cmd === 'export') {
       const format = sub ?? 'cut_manifest_v1'
       const fps = numFlag(flags, 'fps')
@@ -346,11 +419,22 @@ export async function runMuweaveCli(
         const mediaBlobs = manifest.bindings.shotMedia
           .filter((m) => Boolean(m.sha256) && (!episodeRef || !m.episodeRef || m.episodeRef === episodeRef))
           .map((m) => ({ sha256: m.sha256!, ...(m.mime ? { mime: m.mime } : {}) }))
+        let subtitlesSrt: string | undefined
+        if (result.format === 'review_deck_html') {
+          const srtRes = await bridge.call('drama.export.manifest', {
+            format: 'srt_subtitles',
+            ...(episodeRef ? { episodeRef } : {}),
+            ...(fps !== undefined ? { fps } : {}),
+            ...(aspectRatio ? { aspectRatio } : {}),
+          })
+          if (srtRes.ok) subtitlesSrt = (srtRes.data as DramaExportResultV1).content
+        }
         const bundleRes = await exportDramaPortableBundle({
           workspaceDir,
           exportResult: result,
           bundleDir,
           mediaBlobs,
+          ...(subtitlesSrt !== undefined ? { subtitlesSrt } : {}),
         })
         return emit(
           'export.bundle',

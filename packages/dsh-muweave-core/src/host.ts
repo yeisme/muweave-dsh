@@ -56,6 +56,8 @@ import { ScheduleInputError, ScheduleStore } from './schedule-store'
 import { ProjectInputError, ProjectStore } from './project-store'
 import { DramaReviewInputError, DramaReviewStore, isValidShotReviewStatus } from './drama-review-store'
 import { DramaCutInputError, DramaCutStore } from './drama-cut-store'
+import { ContinuityBibleInputError, ContinuityBibleStore } from './continuity-bible-store'
+import { runEpisodeQc, type EpisodeQcAssetInput } from './drama-qc'
 import {
   buildDramaExportPackage,
   DramaExportInputError,
@@ -378,6 +380,8 @@ export class CreatorHostService {
   private readonly dramaCuts: DramaCutStore
   /** User-configured external engine bridge adapters (env var names only, zero plaintext secrets). */
   private readonly customAdapters: CustomAdapterStore
+  /** Per-workspace continuity bible & compliance disclosure metadata. */
+  private readonly continuityBibles: ContinuityBibleStore
 
   constructor(options: CreatorHostServiceOptions = {}) {
     this.runner = options.runner ?? defaultCliRunner
@@ -396,6 +400,7 @@ export class CreatorHostService {
     this.dramaReviews = new DramaReviewStore(path.join(this.pluginDataDir, 'drama-reviews.v1.json'))
     this.dramaCuts = new DramaCutStore(path.join(this.pluginDataDir, 'drama-cuts.v1.json'))
     this.customAdapters = new CustomAdapterStore(path.join(this.pluginDataDir, 'custom-adapters.v1.json'))
+    this.continuityBibles = new ContinuityBibleStore(this.pluginDataDir)
     this.restorePersistedLedgerSync()
     this.capabilities = new CapabilityService({
       pluginDataDir: this.pluginDataDir,
@@ -769,6 +774,12 @@ export class CreatorHostService {
       }
       if (err instanceof CustomAdapterError) {
         return stampHost(rpcFail(this.generation, err.code, err.message, { retryable: false }), this.hostInstanceId)
+      }
+      if (err instanceof ContinuityBibleInputError) {
+        return stampHost(rpcFail(this.generation, err.code, err.message, {
+          retryable: false,
+          ...(err.details ? { details: err.details } : {}),
+        }), this.hostInstanceId)
       }
       throw err
     }
@@ -1386,6 +1397,7 @@ export class CreatorHostService {
               shotRef?: string
               order?: number
               plannedDurationMicros?: number
+              cells?: Record<string, unknown>
               linkedMedia?: DramaExportShotMediaInput[]
             }>
           }
@@ -1402,6 +1414,7 @@ export class CreatorHostService {
               shotRef: row.shotRef,
               ...(sbSummary.episodeRef ? { episodeRef: sbSummary.episodeRef } : {}),
               plannedDurationMicros: typeof row.plannedDurationMicros === 'number' ? row.plannedDurationMicros : 0,
+              ...(row.cells ? { cells: row.cells } : {}),
               ...(bounds ? { inMs: bounds.inMs, outMs: bounds.outMs } : {}),
               ...(combinedMedia.length ? { linkedMedia: combinedMedia } : {}),
             })
@@ -1412,6 +1425,7 @@ export class CreatorHostService {
         const distinctEpisodes = [...new Set(shots.map((s) => s.episodeRef).filter((e): e is string => Boolean(e)))]
         const effectiveEpisodeRef = episodeRef ?? (distinctEpisodes.length === 1 ? distinctEpisodes[0] : undefined)
         const cutOverride = effectiveEpisodeRef ? this.dramaCuts.get(ws.id, effectiveEpisodeRef) : undefined
+        const bible = this.continuityBibles.get(ws.id)
 
         const reviews = this.dramaReviews.list({ workspaceId: ws.id }).reviews
         try {
@@ -1423,6 +1437,7 @@ export class CreatorHostService {
             aspectRatio: typeof payload.aspectRatio === 'string' ? payload.aspectRatio : timelineAspectRatio,
             ...(episodeRef ? { episodeRef } : {}),
             ...(cutOverride ? { cutOverride } : {}),
+            ...(bible.complianceDisclosure ? { complianceDisclosure: bible.complianceDisclosure } : {}),
             shots,
             reviews,
           })
@@ -1493,6 +1508,109 @@ export class CreatorHostService {
           return rpcFail(this.generation, 'muweave/adapter_not_found', `Custom adapter not found: ${adapterId}`, { retryable: false })
         }
         const report = await testCustomAdapter(cfg, this.runner, this.fetchImpl)
+        return rpcOk(this.generation, report)
+      }
+
+      case 'project.bible.get': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        return rpcOk(this.generation, { bible: this.continuityBibles.get(ws.id) })
+      }
+
+      case 'project.bible.set': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const bible = this.continuityBibles.set(ws.id, payload as never)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { bible })
+      }
+
+      case 'drama.shot.review.import': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        try {
+          const result = this.dramaReviews.importFeedback(ws.id, payload.items as never, {
+            allowLocked: payload.allowLocked === true,
+          })
+          if (result.importedCount > 0) this.bumpGeneration()
+          return rpcOk(this.generation, result)
+        } catch (err) {
+          if (err instanceof DramaReviewInputError) {
+            return rpcFail(this.generation, err.code, err.message, { retryable: false })
+          }
+          throw err
+        }
+      }
+
+      case 'drama.qc.report': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const manifest = await readBundleManifestFromDisk(ws.dir)
+        const index = await readBundleIndexFromDisk(ws.dir)
+        const storyboards = index.elements.filter((el) => el.kind === 'drama.storyboard_table')
+        const assetTables = index.elements.filter((el) => el.kind === 'drama.asset_readiness')
+
+        const manifestMediaByShot = new Map<string, DramaExportShotMediaInput[]>()
+        for (const entry of manifest.bindings.shotMedia ?? []) {
+          const list = manifestMediaByShot.get(entry.shotRef) ?? []
+          list.push({
+            role: entry.role,
+            ...(entry.sha256 ? { sha256: entry.sha256 } : {}),
+            ...(entry.elementId ? { elementId: entry.elementId } : {}),
+            ...(entry.mime ? { mime: entry.mime } : {}),
+          })
+          manifestMediaByShot.set(entry.shotRef, list)
+        }
+
+        const shots: DramaExportShotInput[] = []
+        for (const sbSummary of storyboards) {
+          const sbEl = await readElementFromDisk(ws.dir, sbSummary.elementId)
+          const sbPayload = (sbEl.payload ?? {}) as {
+            rows?: Array<{
+              sceneRef?: string
+              shotRef?: string
+              order?: number
+              plannedDurationMicros?: number
+              linkedMedia?: DramaExportShotMediaInput[]
+            }>
+          }
+          for (const row of sbPayload.rows ?? []) {
+            if (!row.shotRef) continue
+            const combinedMedia: DramaExportShotMediaInput[] = [
+              ...(Array.isArray(row.linkedMedia) ? row.linkedMedia : []),
+              ...(manifestMediaByShot.get(row.shotRef) ?? []),
+            ]
+            shots.push({
+              order: typeof row.order === 'number' ? row.order : shots.length + 1,
+              sceneRef: row.sceneRef ?? '',
+              shotRef: row.shotRef,
+              ...(sbSummary.episodeRef ? { episodeRef: sbSummary.episodeRef } : {}),
+              plannedDurationMicros: typeof row.plannedDurationMicros === 'number' ? row.plannedDurationMicros : 0,
+              ...(combinedMedia.length ? { linkedMedia: combinedMedia } : {}),
+            })
+          }
+        }
+
+        const assets: EpisodeQcAssetInput[] = []
+        for (const atSummary of assetTables) {
+          const atEl = await readElementFromDisk(ws.dir, atSummary.elementId)
+          const atPayload = (atEl.payload ?? {}) as { assets?: EpisodeQcAssetInput[] }
+          if (Array.isArray(atPayload.assets)) assets.push(...atPayload.assets)
+        }
+
+        const episodeRef = typeof payload.episodeRef === 'string' && payload.episodeRef.trim() ? payload.episodeRef.trim() : undefined
+        const distinctEpisodes = [...new Set(shots.map((s) => s.episodeRef).filter((e): e is string => Boolean(e)))]
+        const effectiveEpisodeRef = episodeRef ?? (distinctEpisodes.length === 1 ? distinctEpisodes[0] : undefined)
+        const cutOverride = effectiveEpisodeRef ? this.dramaCuts.get(ws.id, effectiveEpisodeRef) : undefined
+        const reviews = this.dramaReviews.list({ workspaceId: ws.id }).reviews
+        const bible = this.continuityBibles.get(ws.id)
+        const root = muweaveRoot(ws.dir)
+
+        const report = runEpisodeQc({
+          ...(episodeRef ? { episodeRef } : {}),
+          shots,
+          cutOverride,
+          reviews,
+          assets,
+          bible,
+          hasCasBlob: (sha) => existsSync(casBlobPath(root, sha)),
+        })
         return rpcOk(this.generation, report)
       }
 

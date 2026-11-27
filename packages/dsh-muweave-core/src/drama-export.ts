@@ -25,6 +25,9 @@ export const VALID_EXPORT_FORMATS: readonly DramaExportFormat[] = [
   'shotlist_csv',
   'fcpxml_1_10',
   'jianying_draft_v1',
+  'srt_subtitles',
+  'webvtt_subtitles',
+  'review_deck_html',
 ] as const
 
 export const VALID_EXPORT_FPS = [24, 25, 30] as const
@@ -62,6 +65,8 @@ export interface DramaExportShotInput {
   plannedDurationMicros: number
   inMs?: number
   outMs?: number
+  dialogue?: string
+  cells?: Record<string, unknown>
   linkedMedia?: readonly DramaExportShotMediaInput[]
 }
 
@@ -73,6 +78,7 @@ export interface DramaExportBuildInput {
   aspectRatio?: string
   episodeRef?: string
   cutOverride?: EpisodeCutOverrideV1
+  complianceDisclosure?: string
   shots: readonly DramaExportShotInput[]
   reviews?: ReadonlyMap<string, ShotReviewRecordV1> | readonly ShotReviewRecordV1[]
   generatedAt?: string
@@ -88,6 +94,7 @@ interface CompiledShot {
   inTc: string
   outTc: string
   transition: CutTransitionKind
+  dialogue?: string
   reviewStatus: ShotReviewStatus
   reviewNote?: string
   reviewTags: string[]
@@ -228,6 +235,16 @@ function compileShots(
     cursorMs = outMs
     const durationMs = outMs - inMs
     const review = reviewMap.get(shot.shotRef)
+    const cellDialogue =
+      typeof shot.dialogue === 'string' && shot.dialogue.trim()
+        ? shot.dialogue.trim()
+        : typeof shot.cells?.dialogue === 'string' && shot.cells.dialogue.trim()
+          ? shot.cells.dialogue.trim()
+          : typeof shot.cells?.subtitle === 'string' && shot.cells.subtitle.trim()
+            ? shot.cells.subtitle.trim()
+            : typeof shot.cells?.action === 'string' && shot.cells.action.trim()
+              ? shot.cells.action.trim()
+              : undefined
     compiled.push({
       order: shot.order,
       sceneRef: shot.sceneRef,
@@ -238,6 +255,7 @@ function compileShots(
       inTc: msToSmpte(inMs, fps),
       outTc: msToSmpte(outMs, fps),
       transition: shot.transition,
+      ...(cellDialogue ? { dialogue: cellDialogue } : {}),
       reviewStatus: review?.status ?? 'draft',
       ...(review?.note ? { reviewNote: review.note } : {}),
       reviewTags: review ? [...review.tags] : [],
@@ -523,6 +541,209 @@ function renderJianyingDraftV1(
   return `${JSON.stringify(draft, null, 2)}\n`
 }
 
+function formatSubtitleTimestamp(ms: number, sep: ',' | '.'): string {
+  const safeMs = Math.max(0, Math.round(ms))
+  const millis = safeMs % 1000
+  const totalSec = Math.floor(safeMs / 1000)
+  const secs = totalSec % 60
+  const totalMin = Math.floor(totalSec / 60)
+  const mins = totalMin % 60
+  const hours = Math.floor(totalMin / 60)
+  return `${pad(hours)}:${pad(mins)}:${pad(secs)}${sep}${pad(millis, 3)}`
+}
+
+function renderSrtSubtitles(shots: readonly CompiledShot[]): string {
+  const blocks: string[] = []
+  shots.forEach((shot, idx) => {
+    const caption = sanitizeSingleLine(shot.dialogue || `${shot.shotRef} (${shot.sceneRef})`)
+    blocks.push(
+      `${idx + 1}\n${formatSubtitleTimestamp(shot.inMs, ',')} --> ${formatSubtitleTimestamp(shot.outMs, ',')}\n${caption}`,
+    )
+  })
+  return blocks.length ? `${blocks.join('\n\n')}\n` : ''
+}
+
+function renderWebvttSubtitles(shots: readonly CompiledShot[]): string {
+  const blocks: string[] = ['WEBVTT']
+  shots.forEach((shot, idx) => {
+    const caption = sanitizeSingleLine(shot.dialogue || `${shot.shotRef} (${shot.sceneRef})`)
+    blocks.push(
+      `${idx + 1}\n${formatSubtitleTimestamp(shot.inMs, '.')} --> ${formatSubtitleTimestamp(shot.outMs, '.')}\n${caption}`,
+    )
+  })
+  return `${blocks.join('\n\n')}\n`
+}
+
+function safeJsonForHtmlScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
+function renderReviewDeckHtml(
+  title: string,
+  aspectRatio: string,
+  totalDurationMs: number,
+  shots: readonly CompiledShot[],
+  complianceDisclosure?: string,
+): string {
+  const deckState = {
+    title,
+    aspectRatio,
+    totalDurationMs,
+    complianceDisclosure: complianceDisclosure?.trim() || '',
+    shots: shots.map((s) => {
+      const visual = s.media.video ?? s.media.keyframe ?? s.media.reference
+      const audio = s.media.voice ?? s.media.sfx ?? s.media.music
+      return {
+        order: s.order,
+        sceneRef: s.sceneRef,
+        shotRef: s.shotRef,
+        durationMs: s.durationMs,
+        inTc: s.inTc,
+        outTc: s.outTc,
+        dialogue: s.dialogue ?? '',
+        status: s.reviewStatus,
+        note: s.reviewNote ?? '',
+        tags: s.reviewTags,
+        visualSrc: visual?.sha256 ? portableRelativeMediaPath(visual.sha256, visual.mime) : '',
+        visualKind: s.media.video ? 'video' : 'image',
+        audioSrc: audio?.sha256 ? portableRelativeMediaPath(audio.sha256, audio.mime ?? 'audio/mpeg') : '',
+      }
+    }),
+  }
+
+  const escapedTitle = xmlEscape(title)
+  const escapedDisclosure = complianceDisclosure?.trim() ? xmlEscape(complianceDisclosure.trim()) : ''
+  const embeddedJson = safeJsonForHtmlScript(deckState)
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>${escapedTitle} — Offline Client Review Deck</title>
+<style>
+:root{--bg:#111318;--card:#1a1e26;--ink:#f3f5f8;--muted:#9aa3b2;--line:#2a3140;--ok:#22c55e;--warn:#eab308;--accent:#38bdf8}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);background:var(--card)}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;border:1px solid var(--line);color:var(--muted)}
+.badge.disclosure{border-color:var(--accent);color:var(--accent)}
+main{max-width:1120px;margin:0 auto;padding:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.shot{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.stage{aspect-ratio:${aspectRatio === '16:9' ? '16/9' : '9/16'};max-height:360px;background:#090b0f;display:flex;align-items:center;justify-content:center;position:relative}
+.stage img,.stage video{width:100%;height:100%;object-fit:contain}
+.poster{padding:16px;text-align:center;color:var(--muted)}
+.body{padding:12px;display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+button{cursor:pointer;border:1px solid var(--line);background:#232936;color:var(--ink);padding:6px 10px;border-radius:8px;font-size:12px}
+button.active-ok{border-color:var(--ok);color:var(--ok)}
+button.active-warn{border-color:var(--warn);color:var(--warn)}
+button.primary{background:var(--accent);color:#081018;border-color:var(--accent);font-weight:600}
+textarea{width:100%;min-height:56px;background:#111318;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <strong>${escapedTitle}</strong>
+    <span class="badge">${shots.length} 镜 · ${(totalDurationMs / 1000).toFixed(1)}s · ${xmlEscape(aspectRatio)}</span>
+    ${escapedDisclosure ? `<span class="badge disclosure" data-compliance-disclosure="true">${escapedDisclosure}</span>` : ''}
+  </div>
+  <button id="download-btn" class="primary" type="button">导出审片反馈 (review-feedback.json)</button>
+</header>
+<main id="deck-root"></main>
+<script id="muweave-deck-data" type="application/json">${embeddedJson}</script>
+<script>
+(function(){
+  const data = JSON.parse(document.getElementById('muweave-deck-data').textContent || '{}');
+  const state = (data.shots || []).map((s) => ({ ...s }));
+  const root = document.getElementById('deck-root');
+  function render() {
+    root.innerHTML = '';
+    state.forEach((shot, idx) => {
+      const card = document.createElement('article');
+      card.className = 'shot';
+      const stage = document.createElement('div');
+      stage.className = 'stage';
+      if (shot.visualSrc) {
+        const el = document.createElement(shot.visualKind === 'video' ? 'video' : 'img');
+        el.src = shot.visualSrc;
+        if (shot.visualKind === 'video') el.controls = true;
+        else el.alt = shot.shotRef;
+        el.onerror = () => { stage.innerHTML = '<div class="poster">' + shot.shotRef + '</div>'; };
+        stage.appendChild(el);
+      } else {
+        const p = document.createElement('div');
+        p.className = 'poster';
+        p.textContent = '#' + shot.order + ' ' + shot.shotRef;
+        stage.appendChild(p);
+      }
+      const body = document.createElement('div');
+      body.className = 'body';
+      const head = document.createElement('div');
+      head.className = 'row';
+      const label = document.createElement('strong');
+      label.textContent = '#' + shot.order + ' ' + shot.shotRef + ' (' + shot.sceneRef + ')';
+      const tc = document.createElement('span');
+      tc.className = 'badge';
+      tc.textContent = shot.inTc + ' → ' + shot.outTc;
+      head.append(label, tc);
+      body.appendChild(head);
+      if (shot.dialogue) {
+        const cap = document.createElement('div');
+        cap.style.color = '#9aa3b2';
+        cap.textContent = shot.dialogue;
+        body.appendChild(cap);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'row';
+      const okBtn = document.createElement('button');
+      okBtn.type = 'button';
+      okBtn.textContent = '通过 (approved)';
+      if (shot.status === 'approved' || shot.status === 'locked') okBtn.className = 'active-ok';
+      okBtn.onclick = () => { state[idx].status = 'approved'; render(); };
+      const revBtn = document.createElement('button');
+      revBtn.type = 'button';
+      revBtn.textContent = '需修改 (needs_revision)';
+      if (shot.status === 'needs_revision') revBtn.className = 'active-warn';
+      revBtn.onclick = () => { state[idx].status = 'needs_revision'; render(); };
+      actions.append(okBtn, revBtn);
+      body.appendChild(actions);
+      const note = document.createElement('textarea');
+      note.placeholder = '输入审片批注...';
+      note.value = shot.note || '';
+      note.oninput = (e) => { state[idx].note = e.target.value; };
+      body.appendChild(note);
+      card.append(stage, body);
+      root.appendChild(card);
+    });
+  }
+  document.getElementById('download-btn').onclick = () => {
+    const payload = state.map((s) => ({
+      shotRef: s.shotRef,
+      status: s.status || 'in_review',
+      ...(s.note && s.note.trim() ? { note: s.note.trim() } : {}),
+      tags: Array.isArray(s.tags) ? s.tags : [],
+    }));
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'review-feedback.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  render();
+})();
+</script>
+</body>
+</html>
+`
+}
+
 export function buildDramaExportPackage(input: DramaExportBuildInput): DramaExportResultV1 {
   if (!isValidDramaExportFormat(input.format)) {
     throw new DramaExportInputError(
@@ -583,6 +804,24 @@ export function buildDramaExportPackage(input: DramaExportBuildInput): DramaExpo
     )
     filename = 'draft_content.json'
     mimeType = 'application/json'
+  } else if (input.format === 'srt_subtitles') {
+    content = renderSrtSubtitles(compiled)
+    filename = `${slug}.srt`
+    mimeType = 'application/x-subrip'
+  } else if (input.format === 'webvtt_subtitles') {
+    content = renderWebvttSubtitles(compiled)
+    filename = `${slug}.vtt`
+    mimeType = 'text/vtt'
+  } else if (input.format === 'review_deck_html') {
+    content = renderReviewDeckHtml(
+      input.title,
+      aspectRatio,
+      totalDurationMs,
+      compiled,
+      input.complianceDisclosure,
+    )
+    filename = `${slug}-review-deck.html`
+    mimeType = 'text/html'
   } else {
     content = renderShotlistCsv(compiled)
     filename = `${slug}-shotlist.csv`
@@ -617,6 +856,7 @@ export interface PortableBundleExportInput {
   exportResult: DramaExportResultV1
   bundleDir: string
   mediaBlobs: ReadonlyArray<{ sha256: string; mime?: string }>
+  subtitlesSrt?: string
 }
 
 export interface PortableBundleExportResult {
@@ -624,13 +864,14 @@ export interface PortableBundleExportResult {
   filename: string
   format: DramaExportFormat
   copiedMediaFiles: string[]
+  subtitlesFile?: 'subtitles.srt'
   readmeFile: 'README.txt'
 }
 
 /**
- * Materializes a self-contained portable NLE handoff folder:
- * `<bundleDir>/<exportResult.filename>`, `<bundleDir>/media/<sha12>.<ext>`, and `<bundleDir>/README.txt`
- * with zero host filesystem paths inside any written file.
+ * Materializes a self-contained portable NLE handoff or offline review deck folder:
+ * `<bundleDir>/<exportResult.filename>`, `<bundleDir>/media/<sha12>.<ext>`, optional `subtitles.srt`,
+ * and `<bundleDir>/README.txt` with zero host filesystem paths inside any written file.
  */
 export async function exportDramaPortableBundle(
   input: PortableBundleExportInput,
@@ -640,6 +881,16 @@ export async function exportDramaPortableBundle(
   await mkdir(mediaDir, { recursive: true })
 
   await writeFile(path.join(outDir, input.exportResult.filename), input.exportResult.content, 'utf8')
+
+  let subtitlesFile: 'subtitles.srt' | undefined
+  if (input.exportResult.format === 'review_deck_html') {
+    const srtContent = input.subtitlesSrt ?? ''
+    if (containsHostPath(srtContent) || findPlaintextCredential(srtContent)) {
+      throw new DramaExportInputError('muweave/unsafe_export_payload', 'Subtitles failed sanitization check')
+    }
+    await writeFile(path.join(outDir, 'subtitles.srt'), srtContent, 'utf8')
+    subtitlesFile = 'subtitles.srt'
+  }
 
   const seen = new Set<string>()
   const copiedMediaFiles: string[] = []
@@ -657,14 +908,17 @@ export async function exportDramaPortableBundle(
   }
 
   const readme = [
-    'MuWeave DSH Portable Rough-Cut Bundle',
+    'MuWeave DSH Portable Rough-Cut / Review Bundle',
     `Format: ${input.exportResult.format}`,
-    `Timeline File: ${input.exportResult.filename}`,
+    `Primary File: ${input.exportResult.filename}`,
+    ...(subtitlesFile ? [`Subtitles File: ${subtitlesFile}`] : []),
     `Shots: ${input.exportResult.shotCount} | Duration: ${(input.exportResult.totalDurationMs / 1000).toFixed(2)}s | FPS: ${input.exportResult.fps} | Aspect: ${input.exportResult.aspectRatio}`,
     `Media Files (${copiedMediaFiles.length}):`,
     ...copiedMediaFiles.map((f) => `  - ${f}`),
     '',
-    'Import the timeline file into Final Cut Pro / DaVinci Resolve / Premiere / Jianying with the sibling media/ folder intact.',
+    input.exportResult.format === 'review_deck_html'
+      ? 'Open the HTML file directly in any browser (works offline), review shots, and export review-feedback.json to import back via `muweave review import`.'
+      : 'Import the timeline file into Final Cut Pro / DaVinci Resolve / Premiere / Jianying with the sibling media/ folder intact.',
     '',
   ].join('\n')
 
@@ -678,6 +932,7 @@ export async function exportDramaPortableBundle(
     filename: input.exportResult.filename,
     format: input.exportResult.format,
     copiedMediaFiles,
+    ...(subtitlesFile ? { subtitlesFile } : {}),
     readmeFile: 'README.txt',
   }
 }

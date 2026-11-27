@@ -159,10 +159,14 @@ export const RPC_ACTIONS = [
   'drama.shot.review.list',
   'drama.shot.review.set',
   'drama.shot.review.batch',
+  'drama.shot.review.import',
   'drama.export.manifest',
   'drama.cut.get',
   'drama.cut.set',
   'drama.cut.reset',
+  'drama.qc.report',
+  'project.bible.get',
+  'project.bible.set',
   'adapter.custom.list',
   'adapter.custom.save',
   'adapter.custom.remove',
@@ -440,12 +444,22 @@ export type DramaExportFormat =
   | 'shotlist_csv'
   | 'fcpxml_1_10'
   | 'jianying_draft_v1'
+  | 'srt_subtitles'
+  | 'webvtt_subtitles'
+  | 'review_deck_html'
 
 export interface DramaExportResultV1 {
   schema: 'muweave.drama-export.v1'
   format: DramaExportFormat
   filename: string
-  mimeType: 'application/json' | 'text/plain' | 'text/csv' | 'application/xml'
+  mimeType:
+    | 'application/json'
+    | 'text/plain'
+    | 'text/csv'
+    | 'application/xml'
+    | 'text/html'
+    | 'text/vtt'
+    | 'application/x-subrip'
   shotCount: number
   totalDurationMs: number
   fps: number
@@ -502,6 +516,97 @@ export interface EpisodeCutSetInputV1 {
   durationOverridesMicros?: Record<string, number>
   transitions?: Record<string, CutTransitionKind>
   expectedRevision?: number
+}
+
+export interface ContinuityColorSwatchV1 {
+  name: string
+  hex: string
+}
+
+export interface ContinuityCharacterAnchorV1 {
+  name: string
+  roleRef?: string
+  wardrobe: string
+  immutableTraits: string
+  negativeNotes?: string
+}
+
+export interface ContinuityVisualGrammarV1 {
+  aspectRatio: string
+  lensStyle: string
+  lightingRule: string
+  styleDirective: string
+}
+
+export interface ContinuityBibleV1 {
+  schema: 'muweave.continuity-bible.v1'
+  workspaceId: string
+  projectTitle?: string
+  visualGrammar: ContinuityVisualGrammarV1
+  colorPalette: ContinuityColorSwatchV1[]
+  characterAnchors: ContinuityCharacterAnchorV1[]
+  negativeGuardrails: string[]
+  complianceDisclosure: string
+  revision: string
+  updatedAt: string
+}
+
+export interface ContinuityBibleSetInputV1 {
+  workspaceId?: string
+  projectTitle?: string
+  visualGrammar?: Partial<ContinuityVisualGrammarV1>
+  colorPalette?: ContinuityColorSwatchV1[]
+  characterAnchors?: ContinuityCharacterAnchorV1[]
+  negativeGuardrails?: string[]
+  complianceDisclosure?: string
+  expectedRevision?: string
+}
+
+export type EpisodeQcSeverity = 'blocker' | 'warning' | 'pass'
+
+export interface EpisodeQcFindingV1 {
+  code: string
+  severity: EpisodeQcSeverity
+  shotRef?: string
+  message: string
+  suggestion?: string
+}
+
+export interface EpisodeQcReportV1 {
+  schema: 'muweave.episode-qc.v1'
+  episodeRef?: string
+  score: number
+  readyForDelivery: boolean
+  counts: {
+    blocker: number
+    warning: number
+    pass: number
+  }
+  shotCount: number
+  totalDurationMs: number
+  findings: EpisodeQcFindingV1[]
+  generatedAt: string
+}
+
+export interface ShotReviewImportItemV1 {
+  shotRef: string
+  status: ShotReviewStatus
+  note?: string
+  tags?: string[]
+}
+
+export interface ShotReviewImportEntryResultV1 {
+  shotRef: string
+  action: 'imported' | 'skipped_locked' | 'invalid'
+  status?: ShotReviewStatus
+  reason?: string
+}
+
+export interface ShotReviewImportResultV1 {
+  importedCount: number
+  skippedLockedCount: number
+  invalidCount: number
+  results: ShotReviewImportEntryResultV1[]
 }
 
 export interface ProjectMigrationCheckV1 {

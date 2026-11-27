@@ -13,6 +13,7 @@ import {
   validateBundleOnDisk,
   type CliRunner,
 } from '@yeisme/muweave-bundle'
+import { ContinuityBibleStore } from './continuity-bible-store'
 import { DramaReviewStore } from './drama-review-store'
 import { ScheduleStore } from './schedule-store'
 
@@ -155,7 +156,7 @@ export async function seedDemoWorkspace(
   await addShotMediaLink(workspaceDir, {
     shotRef: 'shot_01',
     sceneRef: 'scene_01',
-    episodeRef: 'ep_01',
+    episodeRef: 'episode:01',
     role: 'keyframe',
     sha256: blob1.blobDigest,
     mime: 'image/png',
@@ -163,7 +164,7 @@ export async function seedDemoWorkspace(
   await addShotMediaLink(workspaceDir, {
     shotRef: 'shot_02',
     sceneRef: 'scene_01',
-    episodeRef: 'ep_01',
+    episodeRef: 'episode:01',
     role: 'keyframe',
     sha256: blob2.blobDigest,
     mime: 'image/png',
@@ -171,7 +172,7 @@ export async function seedDemoWorkspace(
   await addShotMediaLink(workspaceDir, {
     shotRef: 'shot_03',
     sceneRef: 'scene_02',
-    episodeRef: 'ep_01',
+    episodeRef: 'episode:01',
     role: 'keyframe',
     sha256: blob3.blobDigest,
     mime: 'image/png',
@@ -179,7 +180,7 @@ export async function seedDemoWorkspace(
   await addShotMediaLink(workspaceDir, {
     shotRef: 'shot_04',
     sceneRef: 'scene_02',
-    episodeRef: 'ep_01',
+    episodeRef: 'episode:01',
     role: 'keyframe',
     sha256: blob1.blobDigest,
     mime: 'image/png',
@@ -290,7 +291,7 @@ export async function seedDemoWorkspace(
           project_ref: projectId,
           title: '雨夜怀表 · 第 1 集双时间轴',
           revision: '3',
-          episodes: [{ episode_ref: 'ep_01', title }],
+          episodes: [{ episode_ref: 'episode:01', title }],
           scenes: [
             { scene_ref: 'scene_01', heading: '第一场 · 暴雨霓虹十字路口', story_time: '2026-11-27T23:10:00Z', order: 1 },
             { scene_ref: 'scene_02', heading: '第二场 · 午夜旧城钟表铺', story_time: '2026-11-27T23:25:00Z', order: 2 },
@@ -303,7 +304,7 @@ export async function seedDemoWorkspace(
         {
           kind: 'auctra.scene_card.v1',
           scene_ref: 'scene_01',
-          episode_ref: 'ep_01',
+          episode_ref: 'episode:01',
           revision: '3',
           heading: '第一场 · 暴雨霓虹十字路口',
           location: '外景 · 霓虹老街 · 雨夜',
@@ -319,7 +320,7 @@ export async function seedDemoWorkspace(
         {
           kind: 'auctra.scene_card.v1',
           scene_ref: 'scene_02',
-          episode_ref: 'ep_01',
+          episode_ref: 'episode:01',
           revision: '3',
           heading: '第二场 · 午夜旧城钟表铺',
           location: '内景 · 老钟表铺 · 暖光',
@@ -335,7 +336,7 @@ export async function seedDemoWorkspace(
         {
           kind: 'auctra.scene_card.v1',
           scene_ref: 'scene_03',
-          episode_ref: 'ep_01',
+          episode_ref: 'episode:01',
           revision: '2',
           heading: '第三场 · 停摆指针逆转瞬间',
           location: '内景 · 钟表铺暗室 · 雷鸣',
@@ -364,7 +365,7 @@ export async function seedDemoWorkspace(
       scaena: [
         {
           breakdown_ref: 'bd_ep01',
-          episode_ref: 'ep_01',
+          episode_ref: 'episode:01',
           revision: '2',
           rows: [
             {
@@ -372,7 +373,7 @@ export async function seedDemoWorkspace(
               shot_ref: 'shot_01',
               order: 1,
               planned_duration_micros: 3_500_000,
-              cells: { shot_size: '特写 CU', camera: '缓推', action: '雨滴砸在霓虹积水，铜壳怀表落入掌心' },
+              cells: { shot_size: '特写 CU', camera: '缓推', action: '雨滴砸在霓虹积水，铜壳怀表落入掌心', dialogue: '这块怀表，三年前就该停了。' },
               restricted_fields: [],
             },
             {
@@ -380,7 +381,7 @@ export async function seedDemoWorkspace(
               shot_ref: 'shot_02',
               order: 2,
               planned_duration_micros: 3_000_000,
-              cells: { shot_size: '中景 MS', camera: '跟拍', action: '林深抬头扫视黑伞人群，秒针倒退三格' },
+              cells: { shot_size: '中景 MS', camera: '跟拍', action: '林深抬头扫视黑伞人群，秒针倒退三格', dialogue: '秒针在倒退……它指向街角钟表铺。' },
               restricted_fields: [],
             },
             {
@@ -388,7 +389,7 @@ export async function seedDemoWorkspace(
               shot_ref: 'shot_03',
               order: 3,
               planned_duration_micros: 4_000_000,
-              cells: { shot_size: '过肩 OTS', camera: '固定', action: '推开钟表铺木门，暖光与门外暴雨形成冷暖对撞' },
+              cells: { shot_size: '过肩 OTS', camera: '固定', action: '推开钟表铺木门，暖光与门外暴雨形成冷暖对撞', dialogue: '打烊了，修表请明天再来。' },
               restricted_fields: [],
             },
             {
@@ -396,7 +397,7 @@ export async function seedDemoWorkspace(
               shot_ref: 'shot_04',
               order: 4,
               planned_duration_micros: 3_500_000,
-              cells: { shot_size: '近景 MCU', camera: '急推', action: '顾岚目光定在半张旧车票上，瞳孔骤缩' },
+              cells: { shot_size: '近景 MCU', camera: '急推', action: '顾岚目光定在半张旧车票上，瞳孔骤缩', dialogue: '这张车票……你怎么会有？' },
               restricted_fields: [],
             },
             {
@@ -404,7 +405,7 @@ export async function seedDemoWorkspace(
               shot_ref: 'shot_05',
               order: 5,
               planned_duration_micros: 3_000_000,
-              cells: { shot_size: '特写 ECU', camera: '微移', action: '怀表暗格弹开，露出刻字铜钥匙' },
+              cells: { shot_size: '特写 ECU', camera: '微移', action: '怀表暗格弹开，露出刻字铜钥匙', dialogue: '暗格里刻着你的名字。' },
               restricted_fields: [],
             },
             {
@@ -412,7 +413,7 @@ export async function seedDemoWorkspace(
               shot_ref: 'shot_06',
               order: 6,
               planned_duration_micros: 3_000_000,
-              cells: { shot_size: '全景 WS', camera: '拉远定格', action: '门外脚步逼近，两人对视后切黑出集尾钩子' },
+              cells: { shot_size: '全景 WS', camera: '拉远定格', action: '门外脚步逼近，两人对视后切黑出集尾钩子', dialogue: '快走，他们已经追到这里了！' },
               restricted_fields: [],
             },
           ],
@@ -502,12 +503,45 @@ export async function seedDemoWorkspace(
     const wsId = canonicalWorkspaceId(workspaceDir)
     const reviewStore = new DramaReviewStore(path.join(options.pluginDataDir, 'drama-reviews.v1.json'))
     reviewStore.setBatch(wsId, [
-      { shotRef: 'shot_01', sceneRef: 'scene_01', episodeRef: 'ep_01', status: 'locked', note: '开场三秒钩子定稿', tags: ['钩子', '光影'] },
-      { shotRef: 'shot_02', sceneRef: 'scene_01', episodeRef: 'ep_01', status: 'approved', note: '倒退秒针节奏准确', tags: ['节奏'] },
-      { shotRef: 'shot_03', sceneRef: 'scene_02', episodeRef: 'ep_01', status: 'in_review', note: '待确认暖光色温', tags: ['光影'] },
-      { shotRef: 'shot_04', sceneRef: 'scene_02', episodeRef: 'ep_01', status: 'needs_revision', note: '补强车票特写层次', tags: ['构图'] },
+      { shotRef: 'shot_01', sceneRef: 'scene_01', episodeRef: 'episode:01', status: 'locked', note: '开场三秒钩子定稿', tags: ['钩子', '光影'] },
+      { shotRef: 'shot_02', sceneRef: 'scene_01', episodeRef: 'episode:01', status: 'approved', note: '倒退秒针节奏准确', tags: ['节奏'] },
+      { shotRef: 'shot_03', sceneRef: 'scene_02', episodeRef: 'episode:01', status: 'in_review', note: '待确认暖光色温', tags: ['光影'] },
+      { shotRef: 'shot_04', sceneRef: 'scene_02', episodeRef: 'episode:01', status: 'needs_revision', note: '补强车票特写层次', tags: ['构图'] },
     ])
     reviewCount = 4
+
+    const bibleStore = new ContinuityBibleStore(options.pluginDataDir)
+    bibleStore.set(wsId, {
+      projectTitle: title,
+      visualGrammar: {
+        aspectRatio: '9:16',
+        lensStyle: '35mm 电影感近景为主，特写强调道具细节',
+        lightingRule: '冷蓝雨夜霓虹与钟表铺暖钨丝灯强烈冷暖对撞',
+        styleDirective: '写实国漫悬疑质感，人物五官与风衣褶皱保持跨镜连贯',
+      },
+      colorPalette: [
+        { name: '雨夜深靛', hex: '#1c2a44' },
+        { name: '霓虹冷青', hex: '#2a4a60' },
+        { name: '钨丝暖琥珀', hex: '#d99b4e' },
+      ],
+      characterAnchors: [
+        {
+          name: '林深',
+          roleRef: 'char_lin_shen',
+          wardrobe: '深炭灰双排扣长风衣、微湿碎发、左手铜壳怀表',
+          immutableTraits: '左眉尾浅疤、眼神冷峻克制',
+          negativeNotes: '禁止更换服装颜色或改变怀表材质',
+        },
+        {
+          name: '顾岚',
+          roleRef: 'char_gu_lan',
+          wardrobe: '棕褐色工装围裙、金属细框放大镜、白衬衫卷袖',
+          immutableTraits: '齐肩微卷发、神情警觉',
+        },
+      ],
+      negativeGuardrails: ['禁止多指畸形', '禁止画面出现水印或乱码文字', '禁止角色服装跨镜突变'],
+      complianceDisclosure: '本片画面与声音由 AI 辅助生成（MuWeave DSH 合规披露）',
+    })
 
     const scheduleStore = new ScheduleStore(path.join(options.pluginDataDir, 'schedule.v1.json'))
     scheduleStore.plan({

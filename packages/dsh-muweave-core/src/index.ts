@@ -2,6 +2,8 @@ export * from './protocol'
 export * from './host'
 export * from './drama-review-store'
 export * from './drama-cut-store'
+export * from './continuity-bible-store'
+export * from './drama-qc'
 export * from './drama-export'
 export { seedDemoWorkspace, DemoSeedError, type SeedDemoWorkspaceOptions, type SeedDemoWorkspaceResult } from './demo-seed'
 export {
