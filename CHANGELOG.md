@@ -2,6 +2,16 @@
 
 All notable milestones of the MuWeave DSH Creator Plugin Suite & `.muweave/` workspace bundle are documented here.
 
+## v7 — Custom Engine Bridge, Multi-Episode Non-Destructive Cut & NLE Portable Export (2026-11-27)
+
+- **Zero-Secret Custom Engine Bridge**:
+  - Added `CustomAdapterStore` (`custom-adapters.v1.json`, `0600` atomic write, `.corrupt-*` backup) storing env var names (`authEnvVar`) only, rejecting plaintext secrets (`sk-*` / `Bearer`), and enforcing strict SSRF/HTTPS validation (`ADAPTER_HTTPS_REQUIRED`, `ADAPTER_PRIVATE_NET_FORBIDDEN`).
+  - Added `openai_http`, `comfyui_http`, and no-shell `cli_wrapper` builders, 3 presets (`openai-image`, `openai-tts`, `comfyui-local`), zero-cost `testCustomAdapter` probe, RPCs `adapter.custom.list|save|remove|test`, CLI `muweave adapters`, MCP `muweave_adapters_manage`, and Kit's `.kit-adapter-card` UI with client-side plaintext secret blocking.
+- **Multi-Episode Non-Destructive Cut Layer**:
+  - Added `DramaCutStore` (`drama-cuts.v1.json`, `0600` atomic write, `expectedRevision` optimistic locking → `muweave/cut_revision_conflict`) and `applyEpisodeCut` overlay with RPCs `drama.cut.get|set|reset`, CLI `muweave cut`, MCP `muweave_drama_cut_manage` (16 tools total, still zero `job.approve`), and multi-episode `.dr-episode-bar` switchers + inline cut controls in Drama and Script.
+- **FCPXML 1.10, Jianying Draft & Portable Bundle Export**:
+  - Extended `drama.export.manifest` and `muweave export` with `fcpxml_1_10` (`*.fcpxml`), `jianying_draft_v1` (`draft_content.json`), `--episode` filtering, and `--bundle-dir` portable CAS media export (`media/<sha12>.<ext>`, zero host paths or secrets), plus Timeline 「导出 FCPXML」 & 「导出剪映草稿」 buttons.
+
 ## v6 — Orchestration Control Plane & Open Engine Ecosystem (2026-11-27)
 
 - **Tri-Surface Orchestration Control Plane**:

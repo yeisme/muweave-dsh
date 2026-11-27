@@ -96,11 +96,17 @@ pnpm muweave demo seed --workspace ./demo-ep01
 pnpm muweave status --workspace ./demo-ep01
 pnpm muweave shots list --workspace ./demo-ep01 --missing keyframe
 
-# 3. 审片与导出标准 NLE 粗剪交接包（支持 cut_manifest_v1 / cmx3600_edl / shotlist_csv）
+# 3. 审片、无损粗剪与导出标准 NLE 粗剪交接包（支持 cut_manifest_v1 / cmx3600_edl / shotlist_csv / fcpxml_1_10 / jianying_draft_v1）
 pnpm muweave review set --workspace ./demo-ep01 --shot shot_01 --status approved --note "节奏稳"
 pnpm muweave export cmx3600_edl --workspace ./demo-ep01 --out ./roughcut.edl
+pnpm muweave export fcpxml_1_10 --workspace ./demo-ep01 --episode episode:01 --bundle-dir ./portable-fcpxml
+pnpm muweave export jianying_draft_v1 --workspace ./demo-ep01 --episode episode:01 --bundle-dir ./portable-jianying
 
-# 4. 排期与诊断
+# 4. 外部引擎 Bridge（零明文密钥：仅保存环境变量名，支持 OpenAI / ComfyUI / CLI Wrapper）
+pnpm muweave adapters list --workspace ./demo-ep01
+pnpm muweave adapters test <adapterId> --workspace ./demo-ep01
+
+# 5. 排期与诊断
 pnpm muweave schedule list --workspace ./demo-ep01
 pnpm muweave diagnose --workspace ./demo-ep01 --json
 ```
