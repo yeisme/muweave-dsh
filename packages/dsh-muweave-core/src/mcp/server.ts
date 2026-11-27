@@ -382,6 +382,74 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
       },
     },
   },
+  {
+    name: 'muweave_workspace_tabs',
+    description: 'Get, save (with preset/pin/order/hide), or reset the modular workspace header tabs config.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['get', 'save', 'reset'] },
+        workspaceId: { type: 'string' },
+        presetId: { type: 'string', enum: ['default', 'director', 'writer', 'visual_3d', 'full_studio', 'custom'] },
+        pinnedRoomIds: { type: 'array', items: { type: 'string' } },
+        roomOrder: { type: 'array', items: { type: 'string' } },
+        hiddenRoomIds: { type: 'array', items: { type: 'string' } },
+        expectedRevision: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'muweave_canvas_board',
+    description: 'Get, save, or reset the infinite canvas story/world-building board (nodes & edges).',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['get', 'save', 'reset'] },
+        workspaceId: { type: 'string' },
+        nodes: { type: 'array', items: { type: 'object' } },
+        edges: { type: 'array', items: { type: 'object' } },
+        viewport: { type: 'object' },
+        expectedRevision: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'muweave_stage3d_scene',
+    description: 'Get, save, or reset 3D director stage blocking scenes (camera, actors, lights, props) per shot.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['get', 'save', 'reset'] },
+        workspaceId: { type: 'string' },
+        shotRef: { type: 'string' },
+        camera: { type: 'object' },
+        actors: { type: 'array', items: { type: 'object' } },
+        lights: { type: 'array', items: { type: 'object' } },
+        props: { type: 'array', items: { type: 'object' } },
+        expectedRevision: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'muweave_audio_mix',
+    description: 'Get, save, or reset multitrack audio mix settings (voice/music/sfx gains, mute/solo, fades, cue overrides).',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['get', 'save', 'reset'] },
+        workspaceId: { type: 'string' },
+        episodeRef: { type: 'string' },
+        masterGainPct: { type: 'number' },
+        tracks: { type: 'object' },
+        cues: { type: 'array', items: { type: 'object' } },
+        expectedRevision: { type: 'string' },
+      },
+    },
+  },
 ]
 
 export const MCP_RESOURCES: readonly McpResourceDefinition[] = [
@@ -431,6 +499,30 @@ export const MCP_RESOURCES: readonly McpResourceDefinition[] = [
     uri: 'muweave://drama/qc',
     name: 'Episode QC Gate Report',
     description: 'Automated zero-cost Episode QC report across pacing, media/lip-sync, assets, reviews, and compliance.',
+    mimeType: 'application/json',
+  },
+  {
+    uri: 'muweave://workspace/tabs',
+    name: 'Workspace Modular Tabs Config',
+    description: 'Pinned rooms, ordering, hidden rooms, and active preset for the modular studio header.',
+    mimeType: 'application/json',
+  },
+  {
+    uri: 'muweave://canvas/board',
+    name: 'Infinite Canvas Board',
+    description: 'Nodes, edges, and viewport of the workspace creative canvas.',
+    mimeType: 'application/json',
+  },
+  {
+    uri: 'muweave://stage3d/scenes',
+    name: '3D Stage Blocking Scenes',
+    description: 'Per-shot 3D camera, actor blocking, lighting, and prop layouts.',
+    mimeType: 'application/json',
+  },
+  {
+    uri: 'muweave://audio/mix',
+    name: 'Multitrack Audio Mix Config',
+    description: 'Voice/music/SFX track gains, mute/solo, fades, and per-shot cue overrides.',
     mimeType: 'application/json',
   },
 ]
@@ -731,6 +823,34 @@ export function createMuweaveMcpServer(options: CreateMuweaveMcpServerOptions = 
         return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
       }
 
+      case 'muweave_workspace_tabs': {
+        const op = String(args.action ?? 'get')
+        const rpcAction = op === 'save' ? 'workspace.tabs.save' : op === 'reset' ? 'workspace.tabs.reset' : 'workspace.tabs.get'
+        const res = await bridge.call(rpcAction, args)
+        return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
+      }
+
+      case 'muweave_canvas_board': {
+        const op = String(args.action ?? 'get')
+        const rpcAction = op === 'save' ? 'canvas.board.save' : op === 'reset' ? 'canvas.board.reset' : 'canvas.board.get'
+        const res = await bridge.call(rpcAction, args)
+        return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
+      }
+
+      case 'muweave_stage3d_scene': {
+        const op = String(args.action ?? 'get')
+        const rpcAction = op === 'save' ? 'stage3d.scene.save' : op === 'reset' ? 'stage3d.scene.reset' : 'stage3d.scene.get'
+        const res = await bridge.call(rpcAction, args)
+        return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
+      }
+
+      case 'muweave_audio_mix': {
+        const op = String(args.action ?? 'get')
+        const rpcAction = op === 'save' ? 'audio.mix.save' : op === 'reset' ? 'audio.mix.reset' : 'audio.mix.get'
+        const res = await bridge.call(rpcAction, args)
+        return toolJsonResult(res.ok ? res.data : { error: res.error }, !res.ok)
+      }
+
       default:
         return null
     }
@@ -799,6 +919,26 @@ export function createMuweaveMcpServer(options: CreateMuweaveMcpServerOptions = 
       }
       case 'muweave://drama/qc': {
         const res = await bridge.call('drama.qc.report', {})
+        const body = sanitizeOutput(res.ok ? res.data : { error: res.error })
+        return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] }
+      }
+      case 'muweave://workspace/tabs': {
+        const res = await bridge.call('workspace.tabs.get', {})
+        const body = sanitizeOutput(res.ok ? res.data : { error: res.error })
+        return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] }
+      }
+      case 'muweave://canvas/board': {
+        const res = await bridge.call('canvas.board.get', {})
+        const body = sanitizeOutput(res.ok ? res.data : { error: res.error })
+        return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] }
+      }
+      case 'muweave://stage3d/scenes': {
+        const res = await bridge.call('stage3d.scene.get', {})
+        const body = sanitizeOutput(res.ok ? res.data : { error: res.error })
+        return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] }
+      }
+      case 'muweave://audio/mix': {
+        const res = await bridge.call('audio.mix.get', {})
         const body = sanitizeOutput(res.ok ? res.data : { error: res.error })
         return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] }
       }

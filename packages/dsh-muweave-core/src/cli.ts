@@ -6,10 +6,14 @@ import { readBundleManifestFromDisk, renderAgentOutput, stripHostPaths } from '@
 import { runCapabilityDoctor } from './capabilities/doctor'
 import type { CapabilityCatalogV1 } from './capability-protocol'
 import { DemoSeedError, seedDemoWorkspace } from './demo-seed'
+import { exportCanvasMermaid } from './canvas-board-store'
+import { compileStage3dPrompt } from './stage3d-store'
 import { exportDramaPortableBundle } from './drama-export'
 import { createLocalMcpBridge, createMuweaveMcpServer, createRemoteMcpBridge, runStdioMcpServer } from './mcp/server'
 import { startMuweaveMcpHttpServer } from './mcp/http'
 import type {
+  AudioMixConfigV1,
+  CanvasBoardV1,
   ContinuityBibleV1,
   CustomAdapterViewV1,
   DramaExportResultV1,
@@ -19,7 +23,9 @@ import type {
   ShotReviewBatchResultV1,
   ShotReviewImportResultV1,
   ShotReviewRecordV1,
+  Stage3dScenesV1,
   WorkspaceSummaryView,
+  WorkspaceTabsConfigV1,
 } from './protocol'
 
 interface ParsedArgs {
@@ -83,6 +89,10 @@ Usage:
   muweave bible show
   muweave bible set [--title <text>] [--aspect <ratio>] [--lens <text>] [--lighting <text>] [--style <text>] [--disclosure <text>] [--guardrails a,b] [--expected-revision <rev>]
   muweave qc [--episode <ref>] [--strict]
+  muweave tabs show | preset <default|director|writer|visual_3d|full_studio> | reset
+  muweave canvas show | export-mermaid
+  muweave stage3d show | export-prompts
+  muweave audio show [--episode <ref>]
   muweave cut show [--episode <ref>]
   muweave cut reorder <episodeRef> <shot1,shot2,...>
   muweave cut trim <episodeRef> <shotRef> <seconds>
@@ -397,6 +407,75 @@ export async function runMuweaveCli(
       ].join('\n')
       const ok = !strict || report.readyForDelivery
       return emit('qc', report as unknown as Record<string, unknown>, human, ok)
+    }
+
+    if (cmd === 'tabs') {
+      if (!sub || sub === 'show') {
+        const res = await bridge.call('workspace.tabs.get', {})
+        if (!res.ok) return emitError('tabs.show', res.error.code, res.error.message)
+        const cfg = (res.data as { config: WorkspaceTabsConfigV1 }).config
+        return emit('tabs.show', { config: cfg }, `Tabs preset=${cfg.presetId} rev=${cfg.revision} pinned=${cfg.pinnedRoomIds.join(',')}`)
+      }
+      if (sub === 'preset') {
+        const presetId = positional[2] ?? 'default'
+        const res = await bridge.call('workspace.tabs.save', { presetId })
+        if (!res.ok) return emitError('tabs.preset', res.error.code, res.error.message)
+        const cfg = (res.data as { config: WorkspaceTabsConfigV1 }).config
+        return emit('tabs.preset', { config: cfg }, `Applied tabs preset ${cfg.presetId} (rev ${cfg.revision})`)
+      }
+      if (sub === 'reset') {
+        const res = await bridge.call('workspace.tabs.reset', {})
+        if (!res.ok) return emitError('tabs.reset', res.error.code, res.error.message)
+        return emit('tabs.reset', res.data as Record<string, unknown>, 'Reset workspace tabs to default preset.')
+      }
+      return emitError('tabs', 'muweave/unknown_subcommand', `Unknown tabs subcommand: ${sub}`)
+    }
+
+    if (cmd === 'canvas') {
+      const res = await bridge.call('canvas.board.get', {})
+      if (!res.ok) return emitError('canvas', res.error.code, res.error.message)
+      const board = (res.data as { board: CanvasBoardV1 }).board
+      if (!sub || sub === 'show') {
+        return emit('canvas.show', { board }, `Canvas rev=${board.revision}: ${board.nodes.length} node(s), ${board.edges.length} edge(s)`)
+      }
+      if (sub === 'export-mermaid') {
+        const mermaid = exportCanvasMermaid(board)
+        return emit('canvas.export-mermaid', { mermaid, nodeCount: board.nodes.length, edgeCount: board.edges.length }, mermaid)
+      }
+      return emitError('canvas', 'muweave/unknown_subcommand', `Unknown canvas subcommand: ${sub}`)
+    }
+
+    if (cmd === 'stage3d') {
+      const res = await bridge.call('stage3d.scene.get', {})
+      if (!res.ok) return emitError('stage3d', res.error.code, res.error.message)
+      const scenes = (res.data as { scenes: Stage3dScenesV1 }).scenes
+      const list = Object.values(scenes.scenes)
+      if (!sub || sub === 'show') {
+        return emit('stage3d.show', { scenes }, `Stage3D rev=${scenes.revision}: ${list.length} shot scene(s)`)
+      }
+      if (sub === 'export-prompts') {
+        const prompts = list.map((s) => ({ shotRef: s.shotRef, ...compileStage3dPrompt(s) }))
+        const human = prompts.length
+          ? prompts.map((p) => `${p.shotRef} [${p.shotScale}]: ${p.zh}`).join('\n')
+          : 'No 3D scenes saved.'
+        return emit('stage3d.export-prompts', { prompts }, human)
+      }
+      return emitError('stage3d', 'muweave/unknown_subcommand', `Unknown stage3d subcommand: ${sub}`)
+    }
+
+    if (cmd === 'audio') {
+      if (!sub || sub === 'show') {
+        const episodeRef = strFlag(flags, 'episode')
+        const res = await bridge.call('audio.mix.get', episodeRef ? { episodeRef } : {})
+        if (!res.ok) return emitError('audio.show', res.error.code, res.error.message)
+        const mix = (res.data as { mix: AudioMixConfigV1 }).mix
+        return emit(
+          'audio.show',
+          { mix },
+          `Audio Mix rev=${mix.revision} master=${mix.masterGainPct}% voice=${mix.tracks.voice.gainPct}% music=${mix.tracks.music.gainPct}% sfx=${mix.tracks.sfx.gainPct}% cues=${mix.cues.length}`,
+        )
+      }
+      return emitError('audio', 'muweave/unknown_subcommand', `Unknown audio subcommand: ${sub}`)
     }
 
     if (cmd === 'export') {

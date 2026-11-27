@@ -68,6 +68,30 @@
       ],
       "@yeisme/dsh-muweave-schedule/client": [
         "./packages/dsh-muweave-schedule/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-canvas": [
+        "./packages/dsh-muweave-canvas/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-canvas/client": [
+        "./packages/dsh-muweave-canvas/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-stage3d": [
+        "./packages/dsh-muweave-stage3d/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-stage3d/client": [
+        "./packages/dsh-muweave-stage3d/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-audio": [
+        "./packages/dsh-muweave-audio/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-audio/client": [
+        "./packages/dsh-muweave-audio/src/client.tsx"
+      ],
+      "@yeisme/dsh-muweave-assets": [
+        "./packages/dsh-muweave-assets/src/index.ts"
+      ],
+      "@yeisme/dsh-muweave-assets/client": [
+        "./packages/dsh-muweave-assets/src/client.tsx"
       ]
     }
   },

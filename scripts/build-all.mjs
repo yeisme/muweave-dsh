@@ -124,6 +124,10 @@ const PLUGINS = [
   { dir: 'dsh-muweave-eikona', id: '@yeisme/dsh-muweave-eikona' },
   { dir: 'dsh-muweave-script', id: '@yeisme/dsh-muweave-script' },
   { dir: 'dsh-muweave-drama', id: '@yeisme/dsh-muweave-drama' },
+  { dir: 'dsh-muweave-canvas', id: '@yeisme/dsh-muweave-canvas' },
+  { dir: 'dsh-muweave-stage3d', id: '@yeisme/dsh-muweave-stage3d' },
+  { dir: 'dsh-muweave-audio', id: '@yeisme/dsh-muweave-audio' },
+  { dir: 'dsh-muweave-assets', id: '@yeisme/dsh-muweave-assets' },
   { dir: 'dsh-muweave-kit', id: '@yeisme/dsh-muweave-kit' },
   { dir: 'dsh-muweave-schedule', id: '@yeisme/dsh-muweave-schedule' },
 ]

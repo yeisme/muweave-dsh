@@ -14,6 +14,10 @@ const pluginDirs = [
   'dsh-muweave-eikona',
   'dsh-muweave-script',
   'dsh-muweave-drama',
+  'dsh-muweave-canvas',
+  'dsh-muweave-stage3d',
+  'dsh-muweave-audio',
+  'dsh-muweave-assets',
   'dsh-muweave-kit',
   'dsh-muweave-schedule',
 ]

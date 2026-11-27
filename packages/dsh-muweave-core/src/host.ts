@@ -4,6 +4,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  addShotMediaLink,
   bindBundleRef,
   BundleValidationError,
   casBlobPath,
@@ -11,6 +12,7 @@ import {
   filterElements,
   isSha256Digest,
   muweaveRoot,
+  putCasBlob,
   readBundleIndexFromDisk,
   readBundleManifestFromDisk,
   readCasBlobVerified,
@@ -57,6 +59,10 @@ import { ProjectInputError, ProjectStore } from './project-store'
 import { DramaReviewInputError, DramaReviewStore, isValidShotReviewStatus } from './drama-review-store'
 import { DramaCutInputError, DramaCutStore } from './drama-cut-store'
 import { ContinuityBibleInputError, ContinuityBibleStore } from './continuity-bible-store'
+import { WorkspaceTabsInputError, WorkspaceTabsStore } from './workspace-tabs-store'
+import { CanvasBoardInputError, CanvasBoardStore } from './canvas-board-store'
+import { Stage3dInputError, Stage3dStore } from './stage3d-store'
+import { AudioMixInputError, AudioMixStore } from './audio-mix-store'
 import { runEpisodeQc, type EpisodeQcAssetInput } from './drama-qc'
 import {
   buildDramaExportPackage,
@@ -382,6 +388,14 @@ export class CreatorHostService {
   private readonly customAdapters: CustomAdapterStore
   /** Per-workspace continuity bible & compliance disclosure metadata. */
   private readonly continuityBibles: ContinuityBibleStore
+  /** Modular theater workspace tabs layout & presets. */
+  private readonly workspaceTabs: WorkspaceTabsStore
+  /** Infinite canvas board nodes & edges. */
+  private readonly canvasBoards: CanvasBoardStore
+  /** 3D stage blocking camera/actors/lights/props per shot. */
+  private readonly stage3d: Stage3dStore
+  /** Multitrack audio mixer & cue overrides. */
+  private readonly audioMixes: AudioMixStore
 
   constructor(options: CreatorHostServiceOptions = {}) {
     this.runner = options.runner ?? defaultCliRunner
@@ -401,6 +415,10 @@ export class CreatorHostService {
     this.dramaCuts = new DramaCutStore(path.join(this.pluginDataDir, 'drama-cuts.v1.json'))
     this.customAdapters = new CustomAdapterStore(path.join(this.pluginDataDir, 'custom-adapters.v1.json'))
     this.continuityBibles = new ContinuityBibleStore(this.pluginDataDir)
+    this.workspaceTabs = new WorkspaceTabsStore(this.pluginDataDir)
+    this.canvasBoards = new CanvasBoardStore(this.pluginDataDir)
+    this.stage3d = new Stage3dStore(this.pluginDataDir)
+    this.audioMixes = new AudioMixStore(this.pluginDataDir)
     this.restorePersistedLedgerSync()
     this.capabilities = new CapabilityService({
       pluginDataDir: this.pluginDataDir,
@@ -776,6 +794,17 @@ export class CreatorHostService {
         return stampHost(rpcFail(this.generation, err.code, err.message, { retryable: false }), this.hostInstanceId)
       }
       if (err instanceof ContinuityBibleInputError) {
+        return stampHost(rpcFail(this.generation, err.code, err.message, {
+          retryable: false,
+          ...(err.details ? { details: err.details } : {}),
+        }), this.hostInstanceId)
+      }
+      if (
+        err instanceof WorkspaceTabsInputError ||
+        err instanceof CanvasBoardInputError ||
+        err instanceof Stage3dInputError ||
+        err instanceof AudioMixInputError
+      ) {
         return stampHost(rpcFail(this.generation, err.code, err.message, {
           retryable: false,
           ...(err.details ? { details: err.details } : {}),
@@ -1521,6 +1550,130 @@ export class CreatorHostService {
         const bible = this.continuityBibles.set(ws.id, payload as never)
         this.bumpGeneration()
         return rpcOk(this.generation, { bible })
+      }
+
+      case 'workspace.tabs.get': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        return rpcOk(this.generation, { config: this.workspaceTabs.get(ws.id) })
+      }
+
+      case 'workspace.tabs.save': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const config = this.workspaceTabs.save(ws.id, payload as never)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { config })
+      }
+
+      case 'workspace.tabs.reset': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const config = this.workspaceTabs.reset(ws.id)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { config })
+      }
+
+      case 'canvas.board.get': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        return rpcOk(this.generation, { board: this.canvasBoards.get(ws.id) })
+      }
+
+      case 'canvas.board.save': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const board = this.canvasBoards.save(ws.id, payload as never)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { board })
+      }
+
+      case 'canvas.board.reset': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const board = this.canvasBoards.reset(ws.id)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { board })
+      }
+
+      case 'stage3d.scene.get': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const scenes = this.stage3d.get(ws.id)
+        const shotRef = typeof payload.shotRef === 'string' && payload.shotRef.trim() ? payload.shotRef.trim() : undefined
+        return rpcOk(this.generation, {
+          scenes,
+          ...(shotRef ? { scene: scenes.scenes[shotRef] ?? null } : {}),
+        })
+      }
+
+      case 'stage3d.scene.save': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const saved = this.stage3d.saveScene(ws.id, payload as never)
+        this.bumpGeneration()
+        return rpcOk(this.generation, saved)
+      }
+
+      case 'stage3d.scene.reset': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const shotRef = typeof payload.shotRef === 'string' && payload.shotRef.trim() ? payload.shotRef.trim() : undefined
+        const scenes = this.stage3d.reset(ws.id, shotRef)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { scenes })
+      }
+
+      case 'stage3d.snapshot.save': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const dataUrl = typeof payload.dataUrl === 'string' ? payload.dataUrl : ''
+        const prefix = 'data:image/png;base64,'
+        if (!dataUrl.startsWith(prefix)) {
+          return rpcFail(this.generation, 'muweave/invalid_snapshot', 'dataUrl must start with data:image/png;base64,', { retryable: false })
+        }
+        const buf = Buffer.from(dataUrl.slice(prefix.length), 'base64')
+        const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+        const magicOk = buf.byteLength > 8 && buf.byteLength <= 2_097_152 && PNG_MAGIC.every((b, idx) => buf[idx] === b)
+        if (!magicOk) {
+          return rpcFail(this.generation, 'muweave/invalid_snapshot', 'Snapshot must be a valid PNG <= 2 MiB', { retryable: false })
+        }
+        const label = typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim().slice(0, 80) : 'stage3d-snapshot'
+        const blob = await putCasBlob(ws.dir, new Uint8Array(buf), 'image/png', label)
+        const rawShotRef = typeof payload.shotRef === 'string' && payload.shotRef.trim() ? payload.shotRef.trim() : undefined
+        const bindToShot = payload.bindToShot !== false
+        let boundShotRef: string | undefined
+        if (rawShotRef && bindToShot) {
+          if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(rawShotRef)) {
+            return rpcFail(this.generation, 'muweave/invalid_snapshot', 'shotRef must be a valid opaque reference', { retryable: false })
+          }
+          await addShotMediaLink(ws.dir, {
+            shotRef: rawShotRef,
+            role: 'reference',
+            sha256: blob.blobDigest,
+            mime: 'image/png',
+          })
+          this.stage3d.attachSnapshot(ws.id, rawShotRef, blob.blobDigest)
+          boundShotRef = rawShotRef
+        }
+        this.bumpGeneration()
+        return rpcOk(this.generation, {
+          sha256: blob.blobDigest,
+          mime: 'image/png',
+          bytes: buf.byteLength,
+          ...(boundShotRef ? { boundShotRef } : {}),
+        })
+      }
+
+      case 'audio.mix.get': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const episodeRef = typeof payload.episodeRef === 'string' && payload.episodeRef.trim() ? payload.episodeRef.trim() : undefined
+        return rpcOk(this.generation, { mix: this.audioMixes.get(ws.id, episodeRef) })
+      }
+
+      case 'audio.mix.save': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const mix = this.audioMixes.save(ws.id, payload as never)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { mix })
+      }
+
+      case 'audio.mix.reset': {
+        const ws = this.resolveWorkspace(payload.workspaceId)
+        const episodeRef = typeof payload.episodeRef === 'string' && payload.episodeRef.trim() ? payload.episodeRef.trim() : undefined
+        const mix = this.audioMixes.reset(ws.id, episodeRef)
+        this.bumpGeneration()
+        return rpcOk(this.generation, { mix })
       }
 
       case 'drama.shot.review.import': {

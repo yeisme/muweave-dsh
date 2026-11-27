@@ -17,7 +17,7 @@
   "scripts": {
     "build": "node scripts/build-all.mjs",
     "typecheck": "tsc -b tsconfig.json",
-    "test": "node -e \"require('node:fs').mkdirSync('temp',{recursive:true})\" && NODE_OPTIONS=--localstorage-file=temp/vitest-localstorage.json vitest run",
+    "test": "node -e \"require('node:fs').mkdirSync('temp',{recursive:true})\" && NODE_OPTIONS=--localstorage-file=temp/vitest-localstorage.json vitest run --fileParallelism=false",
     "pack:plugins": "node scripts/pack-plugins.mjs",
     "test:integration": "node scripts/pack-plugins.mjs && node scripts/run-integration-e2e.mjs",
     "muweave": "node packages/dsh-muweave-core/lib/cli.js"

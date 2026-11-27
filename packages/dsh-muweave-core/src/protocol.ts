@@ -167,6 +167,19 @@ export const RPC_ACTIONS = [
   'drama.qc.report',
   'project.bible.get',
   'project.bible.set',
+  'workspace.tabs.get',
+  'workspace.tabs.save',
+  'workspace.tabs.reset',
+  'canvas.board.get',
+  'canvas.board.save',
+  'canvas.board.reset',
+  'stage3d.scene.get',
+  'stage3d.scene.save',
+  'stage3d.scene.reset',
+  'stage3d.snapshot.save',
+  'audio.mix.get',
+  'audio.mix.save',
+  'audio.mix.reset',
   'adapter.custom.list',
   'adapter.custom.save',
   'adapter.custom.remove',
@@ -607,6 +620,212 @@ export interface ShotReviewImportResultV1 {
   skippedLockedCount: number
   invalidCount: number
   results: ShotReviewImportEntryResultV1[]
+}
+
+export type TheaterRoomGroup = 'core' | 'studio' | 'ops'
+
+export type WorkspaceTabPresetId =
+  | 'default'
+  | 'director'
+  | 'writer'
+  | 'visual_3d'
+  | 'full_studio'
+  | 'custom'
+
+export interface WorkspaceTabsConfigV1 {
+  schema: 'muweave.workspace-tabs.v1'
+  workspaceId: string
+  presetId: WorkspaceTabPresetId
+  pinnedRoomIds: string[]
+  roomOrder: string[]
+  hiddenRoomIds: string[]
+  revision: string
+  updatedAt: string
+}
+
+export interface WorkspaceTabsSaveInputV1 {
+  workspaceId?: string
+  presetId?: WorkspaceTabPresetId
+  pinnedRoomIds?: string[]
+  roomOrder?: string[]
+  hiddenRoomIds?: string[]
+  expectedRevision?: string
+}
+
+export type CanvasNodeKind = 'character' | 'scene' | 'prop' | 'shot' | 'note' | 'asset'
+
+export interface CanvasNodeV1 {
+  id: string
+  kind: CanvasNodeKind
+  title: string
+  subtitle?: string
+  x: number
+  y: number
+  width?: number
+  height?: number
+  color?: string
+  elementId?: string
+  refId?: string
+  sha256?: string
+}
+
+export interface CanvasEdgeV1 {
+  id: string
+  from: string
+  to: string
+  label?: string
+  kind?: 'flow' | 'ref' | 'conflict'
+}
+
+export interface CanvasBoardV1 {
+  schema: 'muweave.canvas-board.v1'
+  workspaceId: string
+  nodes: CanvasNodeV1[]
+  edges: CanvasEdgeV1[]
+  viewport?: { x: number; y: number; zoom: number }
+  revision: string
+  updatedAt: string
+}
+
+export interface CanvasBoardSaveInputV1 {
+  workspaceId?: string
+  nodes?: CanvasNodeV1[]
+  edges?: CanvasEdgeV1[]
+  viewport?: { x: number; y: number; zoom: number }
+  expectedRevision?: string
+}
+
+export interface Stage3dCameraV1 {
+  x: number
+  y: number
+  z: number
+  targetX: number
+  targetY: number
+  targetZ: number
+  fovMm: number
+  preset?: string
+}
+
+export interface Stage3dActorV1 {
+  id: string
+  name: string
+  x: number
+  y: number
+  z: number
+  yawDeg: number
+  pose?: string
+  color?: string
+  roleRef?: string
+}
+
+export interface Stage3dLightV1 {
+  id: string
+  kind: 'key' | 'fill' | 'rim' | 'ambient'
+  x: number
+  y: number
+  z: number
+  intensityPct: number
+  colorHex?: string
+}
+
+export interface Stage3dPropV1 {
+  id: string
+  name: string
+  x: number
+  y: number
+  z: number
+  scale?: number
+}
+
+export interface Stage3dShotSceneV1 {
+  shotRef: string
+  episodeRef?: string
+  sceneRef?: string
+  camera: Stage3dCameraV1
+  actors: Stage3dActorV1[]
+  lights: Stage3dLightV1[]
+  props: Stage3dPropV1[]
+  snapshotSha256?: string
+  notes?: string
+  updatedAt: string
+}
+
+export interface Stage3dScenesV1 {
+  schema: 'muweave.stage3d-scenes.v1'
+  workspaceId: string
+  scenes: Record<string, Stage3dShotSceneV1>
+  revision: string
+  updatedAt: string
+}
+
+export interface Stage3dSceneSaveInputV1 {
+  workspaceId?: string
+  shotRef: string
+  episodeRef?: string
+  sceneRef?: string
+  camera: Stage3dCameraV1
+  actors?: Stage3dActorV1[]
+  lights?: Stage3dLightV1[]
+  props?: Stage3dPropV1[]
+  snapshotSha256?: string
+  notes?: string
+  expectedRevision?: string
+}
+
+export interface Stage3dSnapshotSaveInputV1 {
+  workspaceId?: string
+  shotRef?: string
+  dataUrl: string
+  label?: string
+  bindToShot?: boolean
+}
+
+export interface Stage3dSnapshotSaveResultV1 {
+  sha256: string
+  mime: 'image/png'
+  bytes: number
+  boundShotRef?: string
+}
+
+export type AudioTrackKind = 'voice' | 'music' | 'sfx'
+
+export interface AudioTrackMixV1 {
+  track: AudioTrackKind
+  gainPct: number
+  muted: boolean
+  solo: boolean
+  fadeInMs: number
+  fadeOutMs: number
+}
+
+export interface AudioCueOverrideV1 {
+  shotRef: string
+  track: AudioTrackKind
+  offsetMs?: number
+  gainPct?: number
+  fadeInMs?: number
+  fadeOutMs?: number
+  muted?: boolean
+}
+
+export interface AudioMixConfigV1 {
+  schema: 'muweave.audio-mix.v1'
+  workspaceId: string
+  episodeRef?: string
+  masterGainPct: number
+  tracks: Record<AudioTrackKind, AudioTrackMixV1>
+  cues: AudioCueOverrideV1[]
+  revision: string
+  updatedAt: string
+}
+
+export interface AudioMixSaveInputV1 {
+  workspaceId?: string
+  episodeRef?: string
+  masterGainPct?: number
+  tracks?: Partial<Record<AudioTrackKind, Partial<AudioTrackMixV1>>>
+  cues?: AudioCueOverrideV1[]
+  expectedRevision?: string
 }
 
 export interface ProjectMigrationCheckV1 {
