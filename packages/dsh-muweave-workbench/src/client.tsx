@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   CompanionList,
+  EmptyAction,
   EmptyState,
   IconButton,
   Masonry,
@@ -15,6 +16,7 @@ import {
   ShotMedia,
   StatusTag,
   WorkspaceShell,
+  useMediaUrl,
   keyframeDigest,
   openGeneration,
   useGenerationStore,
@@ -22,6 +24,7 @@ import {
   statusLabel,
   statusTone,
   type LinkedMediaRef,
+  type JobRecordV1,
   type WorkspaceNotice,
   publishKnownElementsForTriggers,
   registerMuweaveCreatorPlugin,
@@ -34,20 +37,23 @@ import {
   type OwnerReadinessState,
 } from '@yeisme/dsh-muweave-core/client'
 import { ProjectPanel, type ProjectRow } from './project-panel'
-import { StageAxis } from './stage-axis'
+import { StageSpine, useStageSpineJobs } from './stage-axis'
+import { VerdictPanel } from './verdict-panel'
 import { StageWorkbench } from './stage-workbench'
 import { ComparePaneSlot } from './compare-pane'
 import {
   UNLABELED_GROUP,
-  defaultStage,
+  coverDigest,
+  defaultSpineStage,
   elementSubject,
-  groupByStage,
+  groupBySpineStage,
   groupElements,
   pickPrimary,
   stageLabel,
+  versionLabel,
   type CompareSubject,
   type ElementGroupBy,
-  type StageId,
+  type SpineStageId,
 } from './stage-map'
 import { toolCatalogIntent, useToolCatalog, type ToolCatalogEntry } from '@yeisme/dsh-muweave-core/client'
 
@@ -213,6 +219,28 @@ const BIND_TARGETS = [
   { value: 'scaena-edit-session', label: 'Scaena Edit Session Ref (scaena-edit-session)' },
 ] as const
 
+function SoundArtifact({ rpc, sha256, mime }: { rpc: MuweaveRpcClient; sha256?: string; mime?: string }) {
+  const url = useMediaUrl(rpc, sha256, mime)
+  return url ? <audio controls preload="metadata" src={url} aria-label="试听产物" /> : null
+}
+
+function SoundStage({ rpc, jobs }: { rpc: MuweaveRpcClient; jobs: readonly JobRecordV1[] | undefined }) {
+  const outputs = jobs?.filter((job) => job.owner === 'sonora' && ['voice', 'music', 'sfx'].includes(job.kind))
+    .flatMap((job) => job.slots.filter((slot) => slot.status === 'done').map((slot) => ({ job, slot }))) ?? []
+  return (
+    <section className="mw-stage-work" data-stage-workbench="true" data-stage="sound" data-stage-region="L1">
+      <header className="mw-stage-work-head"><h2>声音</h2></header>
+      {outputs.length ? <div className="mw-stack" data-gap="sm">
+        {outputs.map(({ job, slot }) => (
+          <MediaCard key={job.jobId + '/' + slot.slotId} title={slot.label || job.title} review={slot.review} shotCount={job.anchor?.shotRef ? 1 : 0}>
+            <SoundArtifact rpc={rpc} sha256={slot.sha256} mime={slot.mime} />
+          </MediaCard>
+        ))}
+      </div> : <EmptyAction label="打开声音生成" onAction={(trigger) => openGeneration({ stage: 'sound' }, trigger)} />}
+    </section>
+  )
+}
+
 export function WorkbenchMainPage({
   rpc,
   t,
@@ -223,6 +251,7 @@ export function WorkbenchMainPage({
   coreT: MuweaveTranslator
 }) {
   const [elements, setElements] = useState<MuweaveElementSummaryV1[]>([])
+  const [bundleAvailable, setBundleAvailable] = useState(false)
   const [ownerStates, setOwnerStates] = useState<Record<string, OwnerReadinessState>>({})
   const [domainFilter, setDomainFilter] = useState<string>('all')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
@@ -238,10 +267,11 @@ export function WorkbenchMainPage({
   /** Desk v8: the Overview tab leads with the stage axis; the masonry stays one toggle away as 「全部」. */
   const [overviewMode, setOverviewMode] = useState<'stage' | 'all'>('stage')
   /** Undefined until the user picks one, so the default follows the data as it loads. */
-  const [pickedStage, setPickedStage] = useState<StageId | undefined>(undefined)
+  const [pickedStage, setPickedStage] = useState<SpineStageId | undefined>(undefined)
   /** F1: a view-only projection of the elements in hand; switching it never calls the host. */
   const [groupBy, setGroupBy] = useState<'none' | ElementGroupBy>('none')
   const lang = coreT('langCode')
+  const { mediaRevision } = useGenerationStore()
   /** Desk v8 P1: the pinned compare side as data; the shell slot only holds a bound <ComparePaneSlot />. */
   const [compareTarget, setCompareTarget] = useState<CompareSubject | null>(null)
   /** True while the compare pane is on screen: the inspector steps aside so both columns are equal. */
@@ -253,15 +283,17 @@ export function WorkbenchMainPage({
     const res = await rpc.call<{
       elements: MuweaveElementSummaryV1[]
       ownerStates: Record<string, OwnerReadinessState>
-    }>('bundle.elements.list', { ...(domainFilter === 'all' ? {} : { domain: domainFilter }), ...(activeProject ? { projectId: activeProject.id } : {}) })
+    }>('bundle.elements.list', activeProject ? { projectId: activeProject.id } : {})
+    setBundleAvailable(res.ok && Array.isArray(res.data?.elements))
     // A freshly created project usually has no elements tagged with its id yet. Blanking the room
     // there reads as data loss, so fall back to the workspace projection and flag it as unclaimed.
     if (activeProject && res.ok && (res.data?.elements ?? []).length === 0) {
       const fallback = await rpc.call<{
         elements: MuweaveElementSummaryV1[]
         ownerStates?: Record<string, OwnerReadinessState>
-      }>('bundle.elements.list', { ...(domainFilter === 'all' ? {} : { domain: domainFilter }) })
+      }>('bundle.elements.list', {})
       if (fallback.ok && (fallback.data?.elements ?? []).length > 0) {
+        setBundleAvailable(true)
         setElements(fallback.data.elements)
         setProjectUnclaimed(true)
         setOwnerStates(fallback.data?.ownerStates ?? {})
@@ -276,7 +308,7 @@ export function WorkbenchMainPage({
       setOwnerStates(res.data?.ownerStates ?? {})
       publishKnownElementsForTriggers(list)
     }
-  }, [rpc, domainFilter, activeProject])
+  }, [rpc, activeProject])
 
   useEffect(() => {
     let cancelled = false
@@ -300,7 +332,7 @@ export function WorkbenchMainPage({
 
   useEffect(() => {
     void loadList()
-  }, [loadList])
+  }, [loadList, mediaRevision])
 
   useEffect(() => {
     if (!selectedId) {
@@ -378,7 +410,7 @@ export function WorkbenchMainPage({
     lead?: ReactNode,
   ) => {
     if (items.length === 0) {
-      return <EmptyState>{coreT('emptyElements')}</EmptyState>
+      return <EmptyAction label="同步产物" onAction={() => void syncStage()} />
     }
     return (
       <Masonry min="16rem">
@@ -386,28 +418,18 @@ export function WorkbenchMainPage({
         {items.map((el) => {
           const selected = selectedId === el.elementId
           return (
-            <article
+            <MediaCard
               key={el.elementId}
-              className="mw-dsh-card"
-              data-interactive="true"
-              data-selected={selected ? 'true' : 'false'}
-              onClick={() => setSelectedId(el.elementId)}
+              selected={selected}
+              version={versionLabel(el)}
+              review={el.status}
+              shotCount={new Set(el.shotRefs ?? []).size}
+              stale={el.stale}
+              title={<button type="button" className="mw-card-hit" aria-pressed={selected} onClick={() => setSelectedId(el.elementId)}>{el.title}</button>}
+              meta={el.subtitle}
+              image={coverDigest(el) ? { rpc, sha256: coverDigest(el), alt: el.title, fallback: { label: '查看产物', onAction: () => setSelectedId(el.elementId) } } : undefined}
+              lang={lang}
             >
-              <div className="mw-spread">
-                <button
-                  type="button"
-                  className="mw-card-hit mw-title"
-                  aria-pressed={selected}
-                  onClick={(ev) => {
-                    ev.stopPropagation()
-                    setSelectedId(el.elementId)
-                  }}
-                >
-                  {el.title}
-                </button>
-                <StatusTag status={el.stale ? 'stale' : el.status} lang={lang} />
-              </div>
-              {el.subtitle ? <span className="mw-dsh-muted mw-clamp-2">{el.subtitle}</span> : null}
               <div className="mw-row" data-gap="xs">
                 <span className="mw-chip">{el.sourceOwner}</span>
                 <span className="mw-chip" data-mono="true">
@@ -434,15 +456,21 @@ export function WorkbenchMainPage({
                   }
                 />
               </div>
-            </article>
+            </MediaCard>
           )
         })}
       </Masonry>
     )
   }
 
-  const stageGroups = useMemo(() => groupByStage(elements), [elements])
-  const currentStage = pickedStage ?? defaultStage(stageGroups)
+  const stageGroups = useMemo(() => groupBySpineStage(elements), [elements])
+  const stageJobs = useStageSpineJobs(rpc, undefined, elements)
+  const visibleElements = domainFilter === 'all' ? elements : elements.filter((row) => row.domain === domainFilter)
+  const currentStage = pickedStage ?? defaultSpineStage(stageGroups)
+  const selectStage = (stage: SpineStageId) => {
+    setPickedStage(stage)
+    setSelectedId(undefined)
+  }
   const overviewToggle = (
     <Segmented<'stage' | 'all'>
       label={t('viewLabel')}
@@ -474,8 +502,8 @@ export function WorkbenchMainPage({
     overviewMode === 'stage' ? (
       <div className="mw-stage-overview" data-muweave-overview-mode="stage">
         <div className="mw-stage-layout">
-          <StageAxis groups={stageGroups} current={currentStage} onSelect={setPickedStage} lang={lang} />
-          <StageWorkbench
+          <StageSpine rpc={rpc} groups={stageGroups} current={currentStage} onSelect={selectStage} lang={lang} projectId={activeProject?.id} jobs={stageJobs} refreshKey={elements} bundleAvailable={bundleAvailable} />
+          {currentStage === 'sound' ? <SoundStage rpc={rpc} jobs={stageJobs} /> : <StageWorkbench
             rpc={rpc}
             stage={currentStage}
             rows={stageGroups[currentStage]}
@@ -486,18 +514,18 @@ export function WorkbenchMainPage({
             onPinVariant={(subject, trigger) => pinCompare(onPinCompare, subject, trigger)}
             onDismiss={() => setSelectedId(undefined)}
             onSync={() => void syncStage()}
-          />
+          />}
         </div>
       </div>
     ) : (
       <div className="mw-stage-overview" data-muweave-overview-mode="all">
         <div className="mw-group-bar" data-element-group-bar="true">{groupToggle}</div>
         {groupBy === 'none' || elements.length === 0 ? (
-          renderElementCards(elements, onPinCompare, nextStepCard)
+          renderElementCards(visibleElements, onPinCompare, nextStepCard)
         ) : (
           // Re-keyed per dimension so the regrouped list fades in once.
           <div key={groupBy} className="mw-group-list" data-element-group-by={groupBy}>
-            {groupElements(elements, groupBy).map((group) => (
+            {groupElements(visibleElements, groupBy).map((group) => (
               <section key={group.key} className="mw-group" data-element-group={group.key}>
                 <header className="mw-group-head">
                   <span className="mw-eyebrow">{groupTitle(group.key, group.label)}</span>
@@ -548,7 +576,7 @@ export function WorkbenchMainPage({
             type="button"
             className="mw-nav-item"
             aria-pressed={domainFilter === f.id}
-            onClick={() => setDomainFilter(f.id)}
+            onClick={() => { setDomainFilter(f.id); setOverviewMode('all') }}
           >
             {f.label}
           </button>
@@ -703,7 +731,11 @@ export function WorkbenchMainPage({
         title={t('panelTitle')}
         rpc={rpc}
         t={coreT}
-        rightInspector={compareShown ? undefined : rightInspector}
+        rightInspector={compareShown ? undefined : (
+          <VerdictPanel key={currentElement?.elementId ?? currentStage} rpc={rpc} artifact={currentElement} elements={elements} jobs={stageJobs} onChanged={loadList}>
+            {rightInspector}
+          </VerdictPanel>
+        )}
         onSyncRequested={loadList}
         notice={notice}
         onDismissNotice={() => setNotice(null)}
