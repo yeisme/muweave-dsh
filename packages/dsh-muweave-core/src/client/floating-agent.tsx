@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { MuweaveElementSummaryV1 } from '../protocol'
 import type { MuweaveTranslator } from './i18n'
+import { getActiveTheaterRoomId, subscribeTheater } from './theater/registry'
 import { Icon, IconButton } from './ui'
 
 export type FloatingAgentMode = 'pill' | 'bar' | 'panel'
@@ -120,11 +121,51 @@ export function stageItemToFloatingAgent(item: Omit<StagedComposerItem, 'id'>): 
   notifyListeners()
 }
 
+export function removeStagedItemFromFloatingAgent(id: string): void {
+  const h = getHolder()
+  const nextStaged = h.state.staged.filter((s) => s.id !== id)
+  if (nextStaged.length === h.state.staged.length) return
+  h.state = { ...h.state, staged: nextStaged }
+  notifyListeners()
+}
+
 export function clearFloatingAgentStaged(): void {
   const h = getHolder()
   h.state = { ...h.state, staged: [] }
   notifyListeners()
 }
+
+interface QuickPromptChip {
+  id: string
+  labelZh: string
+  labelEn: string
+  promptZh: string
+  promptEn: string
+}
+
+const ROOM_QUICK_CHIPS: Record<string, readonly QuickPromptChip[]> = {
+  'muweave-drama': [
+    { id: 'drama-missing', labelZh: '诊断缺媒镜头', labelEn: 'Diagnose missing media', promptZh: '请诊断当前剧集分镜中缺失关键帧、视频或音频的镜头，并按优先级给出补齐建议。', promptEn: 'Diagnose shots missing keyframe, video, or audio and prioritize fixes.' },
+    { id: 'drama-revisions', labelZh: '汇总待修改批注', labelEn: 'Summarize revisions', promptZh: '请汇总当前所有标为「需修改」的镜头批注，整理成可执行返工清单。', promptEn: 'Summarize all needs_revision director notes into an actionable checklist.' },
+  ],
+  'muweave-script': [
+    { id: 'script-hook', labelZh: '精修前3秒钩子', labelEn: 'Polish 3s hook', promptZh: '请检查本集开场前 3 秒钩子与核心冲突，给出更有张力的竖屏短剧改写建议。', promptEn: 'Review and sharpen the opening 3-second hook and conflict for vertical drama.' },
+    { id: 'script-breakdown', labelZh: '按本场拆解 9:16 分镜', labelEn: 'Break down 9:16 shots', promptZh: '请按当前剧本场次拆解 9:16 竖屏分镜表，注明景别、运镜与建议时长。', promptEn: 'Break down the current script scene into a 9:16 vertical storyboard with timing.' },
+  ],
+  'muweave-eikona': [
+    { id: 'eikona-turnaround', labelZh: '角色三视图配方', labelEn: 'Character turnaround', promptZh: '请为当前主角生成一致性角色三视图提示词配方（正面/侧面/背面）。', promptEn: 'Draft a consistent 3-view character turnaround prompt recipe.' },
+    { id: 'eikona-sunburst', labelZh: '核对 Sunburst 规格', labelEn: 'Check Sunburst spec', promptZh: '请核对当前视觉候选的 Sunburst 像素尺寸（WxH）与画幅比例是否合规。', promptEn: 'Verify Sunburst WxH pixel dimensions and aspect ratios for current candidates.' },
+  ],
+  'muweave-schedule': [
+    { id: 'sched-week', labelZh: '建议本周排期', labelEn: 'Suggest weekly plan', promptZh: '请结合待排池与当前交付节点，建议本周最优发布排期方案。', promptEn: 'Suggest an optimal publishing schedule for this week from the backlog.' },
+    { id: 'sched-risks', labelZh: '检查阻塞交付项', labelEn: 'Check blocked items', promptZh: '请排查本月已排内容中尚未就绪或存在资产阻塞的风险项。', promptEn: 'Check scheduled items this month for unready assets or delivery blockers.' },
+  ],
+}
+
+const DEFAULT_QUICK_CHIPS: readonly QuickPromptChip[] = [
+  { id: 'default-progress', labelZh: '汇总当前制作进度', labelEn: 'Production status', promptZh: '请汇总当前工作区的剧本、视觉、分镜与排期整体进度。', promptEn: 'Summarize current script, visual, storyboard, and schedule progress.' },
+  { id: 'default-diagnose', labelZh: '检查阻塞与缺口', labelEn: 'Check blockers', promptZh: '请检查当前项目中的资产阻塞、审片待改项与未同步状态。', promptEn: 'Check project asset blockers, pending revisions, and sync health.' },
+]
 
 export interface DshFloatingAgentProps {
   t: MuweaveTranslator
@@ -149,6 +190,7 @@ export function FloatingAgentOverlay({
   resolveCurrentSessionId,
 }: DshFloatingAgentProps) {
   const snap = useSyncExternalStore(subscribeFloatingAgent, getFloatingAgentSnapshot, getFloatingAgentSnapshot)
+  const activeRoomId = useSyncExternalStore(subscribeTheater, getActiveTheaterRoomId, getActiveTheaterRoomId)
   const [, setTick] = useState(0)
 
   useEffect(() => {
@@ -194,11 +236,39 @@ export function FloatingAgentOverlay({
   // Coordinates are measured in px by the host; they are the only inline values on the overlay.
   const position = { left: `${computedLeft}px`, width: `${targetWidth}px` }
 
+  const isEn = t('langCode') === 'en'
+  const quickChips = (activeRoomId ? ROOM_QUICK_CHIPS[activeRoomId] : undefined) ?? DEFAULT_QUICK_CHIPS
+
   const stagedChips = snap.staged.map((item) => (
     <span key={item.id} className="mw-chip" data-staged-chip={item.kind} title={item.serializedLine}>
-      {`@${item.label}`}
+      <span>{`@${item.label}`}</span>
+      <button
+        type="button"
+        className="mw-chip-remove"
+        data-remove-staged-chip={item.id}
+        aria-label={isEn ? `Remove ${item.label}` : `移除 ${item.label}`}
+        onClick={() => removeStagedItemFromFloatingAgent(item.id)}
+      >
+        ×
+      </button>
     </span>
   ))
+
+  const quickChipsRow = (
+    <div className="mw-float-quick-chips" data-float-quick-chips="true" data-active-room={activeRoomId ?? 'default'}>
+      {quickChips.map((chip) => (
+        <button
+          key={chip.id}
+          type="button"
+          className="mw-float-quick-chip"
+          data-quick-chip={chip.id}
+          onClick={() => setFloatingAgentDraft(isEn ? chip.promptEn : chip.promptZh)}
+        >
+          {isEn ? chip.labelEn : chip.labelZh}
+        </button>
+      ))}
+    </div>
+  )
 
   if (snap.mode === 'pill') {
     return (
@@ -286,13 +356,19 @@ export function FloatingAgentOverlay({
             // The input row already carries the placeholder; repeating it here wastes the panel body.
             <p className="mw-fa-hint">{t('agentPanelHint')}</p>
           )}
+          {quickChipsRow}
         </div>
-      ) : snap.staged.length > 0 ? (
-        <div className="mw-row" data-gap="xs">
-          {stagedChips}
-          <IconButton icon="close" size="sm" label={t('agentClearQueue')} onClick={() => clearFloatingAgentStaged()} />
-        </div>
-      ) : null}
+      ) : (
+        <>
+          {snap.staged.length > 0 ? (
+            <div className="mw-row" data-gap="xs">
+              {stagedChips}
+              <IconButton icon="close" size="sm" label={t('agentClearQueue')} onClick={() => clearFloatingAgentStaged()} />
+            </div>
+          ) : null}
+          {quickChipsRow}
+        </>
+      )}
 
       <div className="mw-fa-input-row">
         <span className="mw-fa-spark" aria-hidden="true">

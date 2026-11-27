@@ -395,25 +395,27 @@ export function StageWorkbench({
             </StageThumb>
             <div className="mw-stage-primary-body">
               <span className="mw-stage-primary-title">{primary.title}</span>
-              <span className="mw-stage-primary-actions">
+              <span className="mw-stage-primary-actions mw-row" data-gap="xs">
                 <button type="button" className="mw-dsh-btn" data-variant="primary" data-size="sm" onClick={() => onSelect(primary.elementId)}>
                   {en ? 'Review' : '审阅'}
                 </button>
-                <button
-                  ref={baselineBtnRef}
-                  type="button"
-                  className="mw-dsh-btn"
-                  data-size="sm"
-                  aria-keyshortcuts="c"
-                  title={`${en ? 'Compare baseline' : '对比基线'} (${formatKeyHint('c')})`}
-                  onClick={(ev) => pinBaseline(primary, ev.currentTarget)}
-                >
-                  {en ? 'Compare baseline' : '对比基线'}
-                </button>
-                {/* Outside the button so its name stays the label; aria-keyshortcuts carries the key. */}
-                <kbd className="mw-key-hint" aria-hidden="true">
-                  {formatKeyHint('c')}
-                </kbd>
+                <span className="mw-row" data-gap="xs">
+                  <button
+                    ref={baselineBtnRef}
+                    type="button"
+                    className="mw-dsh-btn"
+                    data-size="sm"
+                    aria-keyshortcuts="c"
+                    title={`${en ? 'Compare baseline' : '对比基线'} (${formatKeyHint('c')})`}
+                    onClick={(ev) => pinBaseline(primary, ev.currentTarget)}
+                  >
+                    {en ? 'Compare baseline' : '对比基线'}
+                  </button>
+                  {/* Outside the button so its name stays the label; aria-keyshortcuts carries the key. */}
+                  <kbd className="mw-key-hint" aria-hidden="true">
+                    {formatKeyHint('c')}
+                  </kbd>
+                </span>
               </span>
               <span className="mw-stage-primary-status">
                 <StatusTag status={primary.stale ? 'stale' : primary.status} lang={lang} />

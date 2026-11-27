@@ -4,6 +4,7 @@ import {
   getFloatingAgentSnapshot,
   publishKnownElementsForTriggers,
   registerMuweavePanelId,
+  removeStagedItemFromFloatingAgent,
   stageItemToFloatingAgent,
   type FloatingAgentMode,
 } from './floating-agent'
@@ -515,6 +516,7 @@ export {
   getSharedMuweaveRpcClient,
   mountMuweaveCoreStyles,
   publishKnownElementsForTriggers,
+  removeStagedItemFromFloatingAgent,
   stageItemToFloatingAgent,
   type CreatorPaneSpec,
   type CreatorStageTabSpec,
@@ -568,11 +570,18 @@ export {
   THEATER_PANEL_ID,
   THEATER_ROOM_STORAGE_KEY,
   getActiveTheaterRoomId,
+  getTheaterRoomBadges,
   getTheaterRooms,
+  navigateToTheaterRoom,
+  publishTheaterRoomBadges,
   setActiveTheaterRoom,
   theaterSeatOwner,
+  useTheaterRoomBadges,
   type TheaterRoom,
+  type TheaterRoomBadge,
+  type TheaterRoomBadgeTone,
 } from './theater/registry'
+export { ShortcutsHelpModal, type ShortcutsHelpModalProps } from './shortcuts-modal'
 export { RoomNav, RoomSwitcher, TheaterPage } from './theater/TheaterPage'
 export {
   AmbientBackdrop,
@@ -596,6 +605,7 @@ export {
   type ProjectCoverRef,
 } from './media'
 export { GenerationLauncher } from './generation'
+export { OrchestrationPanel } from './orchestration-panel'
 export { formatKeyHint, isEditableTarget, keyBinding, matchKey, useKeySequence, type KeyBinding } from './keymap'
 export {
   closeGeneration,
@@ -605,7 +615,25 @@ export {
   useGenerationStore,
   type GenerationOpenRequest,
 } from './generation-store'
-export { ShotGenerateButton, ShotMedia, keyframeDigest, shotDescription, type LinkedMediaRef } from './shot-media'
+export {
+  SHOT_MEDIA_ROLE_LIST,
+  ShotGenerateButton,
+  ShotMedia,
+  keyframeDigest,
+  mediaForRole,
+  shotDescription,
+  shotReadinessSummary,
+  type LinkedMediaRef,
+  type ShotMediaRole,
+  type ShotReadinessSummary,
+} from './shot-media'
+export {
+  AnimaticPlayer,
+  type AnimaticAspect,
+  type AnimaticPlayerProps,
+  type AnimaticShotRow,
+} from './animatic-player'
+export { OrchestrationHealthBanner, type OrchestrationHealthSummary } from './generation-jobs'
 export { ElementChip, SkillChip, FileChip, GenerateChip } from './composer-chips'
 export { COMPOSER_ACTIONS, composerActionDisabledReason } from './composer-actions'
 export { ToolRunCard } from './tool-run-card'
@@ -614,6 +642,7 @@ export {
   groupToolCatalog,
   toolOwnerLabel,
   toolCatalogIntent,
+  unavailableReasonLabel,
   type ToolCatalogEntry,
   type ToolCatalogGroups,
   type ToolCatalogIntent,

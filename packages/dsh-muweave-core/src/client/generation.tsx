@@ -21,6 +21,7 @@ import { PillButton } from './editorial'
 import { getFloatingAgentSnapshot } from './floating-agent'
 import { closeGeneration, openGeneration, useGenerationStore } from './generation-store'
 import { errText, fmtCost, tr } from './generation-jobs'
+import { OrchestrationPanel } from './orchestration-panel'
 import { ToolRunCard } from './tool-run-card'
 import type { MuweaveTranslator } from './i18n'
 import type { MuweaveRpcClient } from './rpc-client'
@@ -143,7 +144,9 @@ function GenerationDrawer({
   const [busy, setBusy] = useState<'estimate' | 'submit' | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [receipt, setReceipt] = useState(false)
+  const [drawerTab, setDrawerTab] = useState<'jobs' | 'orchestration'>('jobs')
   const lang = tr(t, 'langCode')
+  const isEn = lang === 'en'
 
   const selected = caps.find((c) => c.capabilityId === selectedId)
 
@@ -222,99 +225,127 @@ function GenerationDrawer({
         title={tr(t, 'genTitle')}
         actions={<button ref={closeRef} type="button" className="mw-dsh-btn" data-icon="true" data-variant="ghost" data-size="sm" aria-label={tr(t, 'genClose')} title={tr(t, 'genClose')} onClick={closeGeneration}><Icon name="close" /></button>}
       />
-      {catalogError ? <Callout tone="bad">{catalogError}</Callout> : null}
-      <span className="mw-eyebrow">{tr(t, 'genCapabilities')}</span>
-      {caps.length === 0 ? (
-        <EmptyState>{tr(t, 'genNoCaps')}</EmptyState>
-      ) : (
-        <ul className="mw-gen-caps" data-muweave-capabilities="true">
-          {caps.map((c) => {
-            const reason = c.available ? undefined : tr(t, `genReason_${c.unavailableReason ?? ''}`) || c.unavailableReason || tr(t, 'genUnavailable')
-            return (
-              <li key={c.capabilityId}>
-                <button
-                  type="button"
-                  className="mw-gen-cap"
-                  aria-pressed={selectedId === c.capabilityId}
-                  disabled={!c.available}
-                  data-muweave-capability={c.capabilityId}
-                  onClick={() => choose(c)}
-                >
-                  <span className="mw-title">{c.title}</span>
-                  <span className="mw-dsh-muted mw-clamp-2">{reason ? `${tr(t, 'genUnavailable')}：${reason}` : c.summary}</span>
-                  <span className="mw-chip">{tr(t, `genCost_${c.costClass}`)}</span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      {selected ? (
-        <form
-          className="mw-dsh-card mw-stack"
-          data-flat="true"
-          data-muweave-generate-form={selected.capabilityId}
-          onSubmit={(e) => {
-            e.preventDefault()
-            void doEstimate()
-          }}
-          onChange={() => est && setEst(undefined)}
+      <div className="mw-seg" role="group" aria-label={tr(t, 'genTitle')} data-generation-drawer-tabs="true">
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-size="sm"
+          data-generation-drawer-tab="jobs"
+          aria-pressed={drawerTab === 'jobs'}
+          onClick={() => setDrawerTab('jobs')}
         >
-          {selected.inputs.map((f) => (
-            <FieldControl key={f.name} field={f} value={values[f.name] ?? ''} onChange={(v) => setValues((cur) => ({ ...cur, [f.name]: v }))} />
-          ))}
-          {selected.maxSlots > 1 ? (
-            <label className="mw-field">
-              <span>{tr(t, 'genSlots')}</span>
-              <input className="mw-input" type="number" min={1} max={selected.maxSlots} value={slots} onChange={(e) => setSlots(e.target.value)} />
-            </label>
-          ) : null}
-          <div className="mw-row" data-gap="sm">
-            <button type="submit" className="mw-dsh-btn" data-variant="quiet" disabled={missing || busy !== undefined} data-muweave-estimate="true">
-              {busy === 'estimate' ? tr(t, 'genEstimating') : tr(t, 'genEstimate')}
-            </button>
-          </div>
-          {est ? (
-            <div className="mw-stack" data-gap="xs" data-muweave-estimate-result="true">
-              <span className="mw-eyebrow">{tr(t, 'genPlan')}</span>
-              <ul className="mw-gen-plan">
-                {est.e.planLines.map((l, i) => (
-                  <li key={`${i}-${l}`}>{l}</li>
-                ))}
-              </ul>
-              <p>
-                <b>{tr(t, 'genEstimateIs')}</b> {fmtCost(t, est.e.estimate) ?? tr(t, 'genEstimateNone')} · {tr(t, `genCost_${est.e.costClass}`)}
-              </p>
-              <div className="mw-row">
-                <PillButton variant="primary" disabled={busy !== undefined} onClick={() => void doSubmit()} data-muweave-submit="true">
-                  {tr(t, 'genSubmit')}
-                </PillButton>
-              </div>
-            </div>
-          ) : null}
-          {receipt ? <Callout tone="ok" role="status">{tr(t, 'genRequested')}</Callout> : null}
-          {error ? <Callout tone="bad" role="alert">{error}</Callout> : null}
-        </form>
-      ) : null}
-      <span className="mw-eyebrow">{tr(t, 'genJobs')}</span>
-      {jobs.length === 0 ? (
-        <EmptyState>{tr(t, 'genNoJobs')}</EmptyState>
+          {isEn ? 'Jobs' : '生成任务'}
+        </button>
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-size="sm"
+          data-generation-drawer-tab="orchestration"
+          aria-pressed={drawerTab === 'orchestration'}
+          onClick={() => setDrawerTab('orchestration')}
+        >
+          {isEn ? 'Orchestration & Breakers' : '编排与断路器'}
+        </button>
+      </div>
+      {drawerTab === 'orchestration' ? (
+        <OrchestrationPanel rpc={rpc} t={t} />
       ) : (
-        <ul className="mw-stack" data-muweave-jobs="true">
-          {jobs.slice(0, 20).map((job) => (
-            <ToolRunCard
-              key={job.jobId}
-              rpc={rpc}
-              t={t}
-              job={job}
-              capability={capById.get(job.capabilityId)}
-              budget={budget}
-              paidEnabled={catalog?.paidEnabled ?? budget?.paidEnabled ?? false}
-              planLines={planLines.get(job.jobId)}
-              onChanged={onChanged}
-            />
-          ))}
-        </ul>
+        <>
+          {catalogError ? <Callout tone="bad">{catalogError}</Callout> : null}
+          <span className="mw-eyebrow">{tr(t, 'genCapabilities')}</span>
+          {caps.length === 0 ? (
+            <EmptyState>{tr(t, 'genNoCaps')}</EmptyState>
+          ) : (
+            <ul className="mw-gen-caps" data-muweave-capabilities="true">
+              {caps.map((c) => {
+                const reason = c.available ? undefined : tr(t, `genReason_${c.unavailableReason ?? ''}`) || c.unavailableReason || tr(t, 'genUnavailable')
+                return (
+                  <li key={c.capabilityId}>
+                    <button
+                      type="button"
+                      className="mw-gen-cap"
+                      aria-pressed={selectedId === c.capabilityId}
+                      disabled={!c.available}
+                      data-muweave-capability={c.capabilityId}
+                      onClick={() => choose(c)}
+                    >
+                      <span className="mw-title">{c.title}</span>
+                      <span className="mw-dsh-muted mw-clamp-2">{reason ? `${tr(t, 'genUnavailable')}：${reason}` : c.summary}</span>
+                      <span className="mw-chip">{tr(t, `genCost_${c.costClass}`)}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {selected ? (
+            <form
+              className="mw-dsh-card mw-stack"
+              data-flat="true"
+              data-muweave-generate-form={selected.capabilityId}
+              onSubmit={(e) => {
+                e.preventDefault()
+                void doEstimate()
+              }}
+              onChange={() => est && setEst(undefined)}
+            >
+              {selected.inputs.map((f) => (
+                <FieldControl key={f.name} field={f} value={values[f.name] ?? ''} onChange={(v) => setValues((cur) => ({ ...cur, [f.name]: v }))} />
+              ))}
+              {selected.maxSlots > 1 ? (
+                <label className="mw-field">
+                  <span>{tr(t, 'genSlots')}</span>
+                  <input className="mw-input" type="number" min={1} max={selected.maxSlots} value={slots} onChange={(e) => setSlots(e.target.value)} />
+                </label>
+              ) : null}
+              <div className="mw-row" data-gap="sm">
+                <button type="submit" className="mw-dsh-btn" data-variant="quiet" disabled={missing || busy !== undefined} data-muweave-estimate="true">
+                  {busy === 'estimate' ? tr(t, 'genEstimating') : tr(t, 'genEstimate')}
+                </button>
+              </div>
+              {est ? (
+                <div className="mw-stack" data-gap="xs" data-muweave-estimate-result="true">
+                  <span className="mw-eyebrow">{tr(t, 'genPlan')}</span>
+                  <ul className="mw-gen-plan">
+                    {est.e.planLines.map((l, i) => (
+                      <li key={`${i}-${l}`}>{l}</li>
+                    ))}
+                  </ul>
+                  <p>
+                    <b>{tr(t, 'genEstimateIs')}</b> {fmtCost(t, est.e.estimate) ?? tr(t, 'genEstimateNone')} · {tr(t, `genCost_${est.e.costClass}`)}
+                  </p>
+                  <div className="mw-row">
+                    <PillButton variant="primary" disabled={busy !== undefined} onClick={() => void doSubmit()} data-muweave-submit="true">
+                      {tr(t, 'genSubmit')}
+                    </PillButton>
+                  </div>
+                </div>
+              ) : null}
+              {receipt ? <Callout tone="ok" role="status">{tr(t, 'genRequested')}</Callout> : null}
+              {error ? <Callout tone="bad" role="alert">{error}</Callout> : null}
+            </form>
+          ) : null}
+          <span className="mw-eyebrow">{tr(t, 'genJobs')}</span>
+          {jobs.length === 0 ? (
+            <EmptyState>{tr(t, 'genNoJobs')}</EmptyState>
+          ) : (
+            <ul className="mw-stack" data-muweave-jobs="true">
+              {jobs.slice(0, 20).map((job) => (
+                <ToolRunCard
+                  key={job.jobId}
+                  rpc={rpc}
+                  t={t}
+                  job={job}
+                  capability={capById.get(job.capabilityId)}
+                  budget={budget}
+                  paidEnabled={catalog?.paidEnabled ?? budget?.paidEnabled ?? false}
+                  planLines={planLines.get(job.jobId)}
+                  onChanged={onChanged}
+                />
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   )

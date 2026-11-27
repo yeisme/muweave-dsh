@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Callout,
   CompanionList,
@@ -6,6 +6,7 @@ import {
   IconButton,
   RoomHero,
   SectionHead,
+  Segmented,
   StatusTag,
   WorkspaceShell,
   type WorkspaceNotice,
@@ -61,6 +62,12 @@ const zh = {
   statScenes: '场',
   statCandidates: '个候选改写',
   statStale: '处基线过期',
+  viewCardsEdit: '卡片编辑',
+  viewLinearRead: '线性阅读',
+  sceneViewModeLabel: '场次查看模式',
+  estDurationSec: '约 {sec} 秒',
+  estEpisodeTotal: '全集估算时长',
+  seconds: '秒',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -99,6 +106,12 @@ const en: Record<keyof typeof zh, string> = {
   statScenes: 'scenes',
   statCandidates: 'candidate rewrites',
   statStale: 'stale baselines',
+  viewCardsEdit: 'Card Edit',
+  viewLinearRead: 'Linear Reader',
+  sceneViewModeLabel: 'Scene view mode',
+  estDurationSec: '~{sec}s',
+  estEpisodeTotal: 'Est. Episode Duration',
+  seconds: 's',
 }
 
 export function ScriptIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -108,6 +121,25 @@ export function ScriptIcon({ size = 16, active = false }: { size?: number; activ
       <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   )
+}
+
+type SceneViewMode = 'cards' | 'reader'
+
+function estimateReadingSeconds(payload: Record<string, unknown> | undefined, title?: string): number {
+  const parts = [
+    payload?.goal,
+    payload?.obstacle,
+    payload?.turn,
+    payload?.summary,
+    payload?.dialogue,
+    payload?.body,
+    title,
+  ]
+  const text = parts
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .join('')
+    .replace(/\s+/g, '')
+  return Math.max(3, Math.round(text.length / 4))
 }
 
 export function ScriptMainPage({
@@ -122,6 +154,8 @@ export function ScriptMainPage({
   const [elements, setElements] = useState<MuweaveElementSummaryV1[]>([])
   const [details, setDetails] = useState<Record<string, MuweaveElementV1>>({})
   const [editingSceneId, setEditingSceneId] = useState<string | undefined>(undefined)
+  const [focusedSceneId, setFocusedSceneId] = useState<string | undefined>(undefined)
+  const [sceneViewMode, setSceneViewMode] = useState<SceneViewMode>('cards')
   const [goalInput, setGoalInput] = useState('')
   const [obstacleInput, setObstacleInput] = useState('')
   const [turnInput, setTurnInput] = useState('')
@@ -196,6 +230,38 @@ export function ScriptMainPage({
   const lang = coreT('langCode')
   const staleCount = elements.filter((e) => e.stale).length
 
+  const sceneCardByRef = useMemo(() => {
+    const map = new Map<string, MuweaveElementSummaryV1>()
+    for (const sc of sceneCards) {
+      const pl = (details[sc.elementId]?.payload ?? {}) as Record<string, unknown>
+      const ref = typeof pl.sceneRef === 'string' && pl.sceneRef ? pl.sceneRef : sc.sceneRef || sc.sourceRef
+      if (ref) map.set(ref, sc)
+      map.set(sc.elementId, sc)
+    }
+    return map
+  }, [sceneCards, details])
+
+  const totalEstimatedSec = useMemo(
+    () =>
+      sceneCards.reduce((sum, sc) => {
+        const pl = (details[sc.elementId]?.payload ?? {}) as Record<string, unknown>
+        return sum + estimateReadingSeconds(pl, sc.title)
+      }, 0),
+    [sceneCards, details],
+  )
+
+  const jumpToSceneCard = (sceneElementId: string | undefined) => {
+    if (sceneElementId) {
+      setFocusedSceneId(sceneElementId)
+      selectCardForEdit(sceneElementId)
+    }
+    setSceneViewMode('cards')
+    if (typeof document !== 'undefined') {
+      const tabBtn = document.getElementById('mw-tab-scene-cards')
+      if (tabBtn instanceof HTMLButtonElement) tabBtn.click()
+    }
+  }
+
   return (
     <WorkspaceShell
       title={t('panelTitle')}
@@ -237,12 +303,44 @@ export function ScriptMainPage({
                       <div className="sc-track">
                         <span className="mw-eyebrow">{t('trackNarrative')}</span>
                         <ol className="sc-lane">
-                          {(pl.scenes ?? []).map((s, idx) => (
-                            <li key={s.scene_ref ?? idx} className="sc-block" title={s.scene_ref}>
-                              <span className="mw-kbd">#{s.order ?? idx + 1}</span>
-                              <span>{s.title ?? s.scene_ref}</span>
-                            </li>
-                          ))}
+                          {(pl.scenes ?? []).map((s, idx) => {
+                            const matchedCard = s.scene_ref ? sceneCardByRef.get(s.scene_ref) : undefined
+                            const cardPayload = matchedCard
+                              ? ((details[matchedCard.elementId]?.payload ?? {}) as Record<string, unknown>)
+                              : undefined
+                            const snippet = [cardPayload?.goal, cardPayload?.turn]
+                              .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+                              .join(' · ')
+                            const estSec = estimateReadingSeconds(cardPayload, s.title ?? matchedCard?.title)
+                            return (
+                              <li key={s.scene_ref ?? idx} className="sc-block" title={s.scene_ref}>
+                                <button
+                                  type="button"
+                                  className="sc-timeline-card mw-stack"
+                                  data-gap="xs"
+                                  data-script-timeline-card={s.scene_ref ?? String(idx)}
+                                  data-est-duration={String(estSec)}
+                                  onClick={() => jumpToSceneCard(matchedCard?.elementId)}
+                                >
+                                  <span className="mw-spread">
+                                    <span className="mw-row" data-gap="xs">
+                                      <span className="mw-kbd">#{s.order ?? idx + 1}</span>
+                                      <span className="mw-title">{s.title ?? s.scene_ref}</span>
+                                    </span>
+                                    <span className="mw-row" data-gap="xs">
+                                      <span className="mw-chip">{t('estDurationSec').replace('{sec}', String(estSec))}</span>
+                                      {matchedCard ? (
+                                        <StatusTag status={matchedCard.stale ? 'stale' : matchedCard.status} lang={lang} />
+                                      ) : null}
+                                    </span>
+                                  </span>
+                                  {snippet ? (
+                                    <span className="mw-dsh-muted mw-clamp-2">{snippet}</span>
+                                  ) : null}
+                                </button>
+                              </li>
+                            )
+                          })}
                         </ol>
                       </div>
                       <div className="sc-track">
@@ -269,45 +367,106 @@ export function ScriptMainPage({
             sceneCards.length === 0 ? (
               <EmptyState>{coreT('emptyElements')}</EmptyState>
             ) : (
-              <div className="mw-split-2" data-script-reading="true">
-              <article className="mw-dsh-card mw-read" aria-label={t('readingTitle')}>
-                <p className="mw-eyebrow">{t('readingTitle')}</p>
-                {sceneCards.map((sc) => {
-                  const pl = (details[sc.elementId]?.payload ?? {}) as Record<string, unknown>
-                  const beats = [
-                    [t('goal'), pl.goal],
-                    [t('obstacle'), pl.obstacle],
-                    [t('turn'), pl.turn],
-                  ] as const
-                  return (
-                    <section key={sc.elementId}>
-                      <h4>{sc.title}</h4>
-                      {beats
-                        .filter(([, v]) => v !== undefined && v !== null && String(v) !== '')
-                        .map(([label, v]) => (
-                          <p key={label}>
-                            <span className="mw-read-beat">{label}</span> {String(v)}
-                          </p>
-                        ))}
-                    </section>
-                  )
-                })}
-              </article>
-              <div className="mw-stack">
-                {sceneCards.map((sc) => {
-                  const pl = (details[sc.elementId]?.payload ?? {}) as Record<string, unknown>
-                  const sceneRef = String(pl.sceneRef ?? sc.sourceRef)
-                  const rev = String(pl.revision ?? sc.sourceRevision ?? '1')
-                  const isEditing = editingSceneId === sc.elementId
-                  return (
-                    <article key={sc.elementId} className="mw-dsh-card" data-selected={isEditing ? 'true' : undefined}>
-                      <div className="mw-spread">
-                        <span className="mw-title">{sc.title}</span>
-                        <span className="mw-row" data-gap="xs">
-                          <span className="mw-kbd">v{rev}</span>
-                          <StatusTag status={sc.stale ? 'stale' : sc.status} lang={lang} />
-                        </span>
-                      </div>
+              <div className="mw-stack" data-gap="md">
+                <div className="mw-spread" data-script-scene-toolbar="true">
+                  <Segmented<SceneViewMode>
+                    label={t('sceneViewModeLabel')}
+                    value={sceneViewMode}
+                    options={[
+                      { value: 'cards', label: t('viewCardsEdit') },
+                      { value: 'reader', label: t('viewLinearRead') },
+                    ]}
+                    onChange={setSceneViewMode}
+                  />
+                  <span className="mw-dsh-muted" data-script-total-duration={String(totalEstimatedSec)}>
+                    {t('estEpisodeTotal')}: <b>{totalEstimatedSec} {t('seconds')}</b>
+                  </span>
+                </div>
+
+                {sceneViewMode === 'reader' ? (
+                  <article className="sc-reader mw-dsh-card mw-read mw-stack" data-gap="md" data-script-reader="true" aria-label={t('readingTitle')}>
+                    <div className="mw-spread">
+                      <p className="mw-eyebrow">{t('readingTitle')}</p>
+                      <span className="mw-chip">
+                        {t('estEpisodeTotal')} · {totalEstimatedSec} {t('seconds')}
+                      </span>
+                    </div>
+                    {sceneCards.map((sc) => {
+                      const pl = (details[sc.elementId]?.payload ?? {}) as Record<string, unknown>
+                      const estSec = estimateReadingSeconds(pl, sc.title)
+                      const beats = [
+                        [t('goal'), pl.goal],
+                        [t('obstacle'), pl.obstacle],
+                        [t('turn'), pl.turn],
+                      ] as const
+                      return (
+                        <section key={sc.elementId} className="mw-stack" data-gap="xs" data-reader-scene={sc.elementId}>
+                          <div className="mw-spread">
+                            <h4>{sc.title}</h4>
+                            <span className="mw-row" data-gap="xs">
+                              <span className="mw-chip">{t('estDurationSec').replace('{sec}', String(estSec))}</span>
+                              <StatusTag status={sc.stale ? 'stale' : sc.status} lang={lang} />
+                            </span>
+                          </div>
+                          {beats
+                            .filter(([, v]) => v !== undefined && v !== null && String(v) !== '')
+                            .map(([label, v]) => (
+                              <p key={label}>
+                                <span className="mw-read-beat">{label}</span> {String(v)}
+                              </p>
+                            ))}
+                        </section>
+                      )
+                    })}
+                  </article>
+                ) : (
+                  <div className="mw-split-2" data-script-reading="true">
+                    <article className="mw-dsh-card mw-read" aria-label={t('readingTitle')}>
+                      <p className="mw-eyebrow">{t('readingTitle')}</p>
+                      {sceneCards.map((sc) => {
+                        const pl = (details[sc.elementId]?.payload ?? {}) as Record<string, unknown>
+                        const beats = [
+                          [t('goal'), pl.goal],
+                          [t('obstacle'), pl.obstacle],
+                          [t('turn'), pl.turn],
+                        ] as const
+                        return (
+                          <section key={sc.elementId}>
+                            <h4>{sc.title}</h4>
+                            {beats
+                              .filter(([, v]) => v !== undefined && v !== null && String(v) !== '')
+                              .map(([label, v]) => (
+                                <p key={label}>
+                                  <span className="mw-read-beat">{label}</span> {String(v)}
+                                </p>
+                              ))}
+                          </section>
+                        )
+                      })}
+                    </article>
+                    <div className="mw-stack">
+                      {sceneCards.map((sc) => {
+                        const pl = (details[sc.elementId]?.payload ?? {}) as Record<string, unknown>
+                        const sceneRef = String(pl.sceneRef ?? sc.sourceRef)
+                        const rev = String(pl.revision ?? sc.sourceRevision ?? '1')
+                        const isEditing = editingSceneId === sc.elementId
+                        const isFocused = focusedSceneId === sc.elementId
+                        const estSec = estimateReadingSeconds(pl, sc.title)
+                        return (
+                          <article
+                            key={sc.elementId}
+                            className="mw-dsh-card"
+                            data-scene-card-item={sceneRef}
+                            data-selected={isEditing || isFocused ? 'true' : undefined}
+                          >
+                            <div className="mw-spread">
+                              <span className="mw-title">{sc.title}</span>
+                              <span className="mw-row" data-gap="xs">
+                                <span className="mw-chip">{t('estDurationSec').replace('{sec}', String(estSec))}</span>
+                                <span className="mw-kbd">v{rev}</span>
+                                <StatusTag status={sc.stale ? 'stale' : sc.status} lang={lang} />
+                              </span>
+                            </div>
                       {isEditing ? (
                         <form
                           className="mw-stack"
@@ -424,9 +583,11 @@ export function ScriptMainPage({
                         </>
                       )}
                     </article>
-                  )
-                })}
-              </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                )}
               </div>
             ),
         },

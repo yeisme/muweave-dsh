@@ -1,12 +1,17 @@
 /** Storyboard shot helpers shared by the 成稿 room and the drama grid (docs/design/creator-platform-v1.md). */
 
 import type { ReactNode } from 'react'
-import type { ProductionAnchorV1 } from '../protocol'
+import type { CapabilityStage, ProductionAnchorV1 } from '../protocol'
 import type { MuweaveTranslator } from './i18n'
 import { openGeneration } from './generation-store'
 import { tr } from './generation-jobs'
 import { useMediaUrl } from './media'
 import type { MuweaveRpcClient } from './rpc-client'
+
+/** Canonical 6 media roles bound to a storyboard shot. */
+export const SHOT_MEDIA_ROLE_LIST = ['keyframe', 'reference', 'video', 'voice', 'music', 'sfx'] as const
+
+export type ShotMediaRole = (typeof SHOT_MEDIA_ROLE_LIST)[number]
 
 /** One `shotMedia` link carried on a `drama.storyboard_table` row (keyframe first). */
 export interface LinkedMediaRef {
@@ -15,6 +20,33 @@ export interface LinkedMediaRef {
   artifactId?: string
   role: string
   mime?: string
+}
+
+/** Return all linked media items matching a given role. */
+export function mediaForRole(linked: readonly LinkedMediaRef[] | undefined, role: ShotMediaRole | string): LinkedMediaRef[] {
+  if (!linked || linked.length === 0) return []
+  return linked.filter((m) => m.role === role)
+}
+
+export interface ShotReadinessSummary {
+  hasVisual: boolean
+  hasVideo: boolean
+  hasAudio: boolean
+  rolesPresent: Set<string>
+  filledCount: number
+}
+
+/** Summarize 6-role media readiness for a storyboard shot. */
+export function shotReadinessSummary(linked: readonly LinkedMediaRef[] | undefined): ShotReadinessSummary {
+  const rolesPresent = new Set<string>()
+  for (const item of linked ?? []) {
+    if (item.role) rolesPresent.add(item.role)
+  }
+  const hasVideo = rolesPresent.has('video')
+  const hasVisual = rolesPresent.has('keyframe') || rolesPresent.has('reference') || hasVideo
+  const hasAudio = rolesPresent.has('voice') || rolesPresent.has('music') || rolesPresent.has('sfx')
+  const filledCount = SHOT_MEDIA_ROLE_LIST.filter((role) => rolesPresent.has(role)).length
+  return { hasVisual, hasVideo, hasAudio, rolesPresent, filledCount }
 }
 
 /** The keyframe digest to show: the first image link that carries bytes. */
@@ -52,11 +84,17 @@ export function ShotGenerateButton({
   shotRef,
   prompt,
   anchor,
+  capabilityId = 'eikona.image.generate',
+  label,
+  stage = ['visual', 'storyboard', 'sound'],
 }: {
   t: MuweaveTranslator
   shotRef: string
   prompt: string
   anchor: ProductionAnchorV1
+  capabilityId?: string
+  label?: string
+  stage?: CapabilityStage[]
 }) {
   return (
     <button
@@ -68,16 +106,16 @@ export function ShotGenerateButton({
       onClick={(ev) =>
         openGeneration(
           {
-            capabilityId: 'eikona.image.generate',
+            capabilityId,
             input: { prompt },
             anchor: { ...anchor, shotRef },
-            stage: ['visual', 'storyboard', 'sound'],
+            stage,
           },
           ev.currentTarget,
         )
       }
     >
-      {tr(t, 'genForShot')}
+      {label ?? tr(t, 'genForShot')}
     </button>
   )
 }

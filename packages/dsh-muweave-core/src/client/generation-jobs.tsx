@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import type {
+  BudgetLineV1,
   BudgetStatusV1,
   CapabilityDescriptorV1,
   CostAmountV1,
@@ -133,6 +134,12 @@ export function ApprovalCard({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const line = budget?.lines.find((l) => l.unit === unit)
+  const windows = (budget as (BudgetStatusV1 & {
+    windowSummaries?: { last7Days?: BudgetLineV1[]; allTime?: BudgetLineV1[] }
+  }) | undefined)?.windowSummaries
+  const last7Line = windows?.last7Days?.find((l) => l.unit === unit)
+  const allTimeLine = windows?.allTime?.find((l) => l.unit === unit)
+  const isEn = tr(t, 'langCode') === 'en'
   const ceilingNum = ceiling.trim() === '' ? undefined : Number(ceiling)
   const ceilingBad = ceilingNum !== undefined && (!Number.isFinite(ceilingNum) || ceilingNum <= 0)
   const belowEstimate = ceilingNum !== undefined && !ceilingBad && job.estimate.amount !== undefined && ceilingNum < job.estimate.amount
@@ -192,6 +199,24 @@ export function ApprovalCard({
           {tr(t, 'genToday', { committed: fmtCost(t, { unit, amount: line.committed }) ?? '0', spent: line.spent > 0 ? (fmtCost(t, { unit, amount: line.spent }) ?? '0') : (budget?.unknownCostJobs ?? 0) > 0 ? tr(t, 'genSpentUnreported') : (fmtCost(t, { unit, amount: 0 }) ?? '0') })}
           {line.dailyCap !== undefined ? ` · ${tr(t, 'genDailyCap', { cap: fmtCost(t, { unit, amount: line.dailyCap }) ?? '' })}` : ''}
           {(budget?.unknownCostJobs ?? 0) > 0 ? ` · ${tr(t, 'genUnknownCostJobs', { n: String(budget?.unknownCostJobs) })}` : ''}
+        </p>
+      ) : null}
+      {last7Line || allTimeLine ? (
+        <p className="mw-dsh-muted" data-muweave-budget-windows="true">
+          {[
+            last7Line
+              ? isEn
+                ? `Last 7d: spent ${fmtCost(t, { unit, amount: last7Line.spent }) ?? '0'}${last7Line.committed > 0 ? `, committed ${fmtCost(t, { unit, amount: last7Line.committed }) ?? '0'}` : ''}`
+                : `近 7 日：已花 ${fmtCost(t, { unit, amount: last7Line.spent }) ?? '0'}${last7Line.committed > 0 ? `，已承诺 ${fmtCost(t, { unit, amount: last7Line.committed }) ?? '0'}` : ''}`
+              : undefined,
+            allTimeLine
+              ? isEn
+                ? `All-time: spent ${fmtCost(t, { unit, amount: allTimeLine.spent }) ?? '0'}`
+                : `累计：已花 ${fmtCost(t, { unit, amount: allTimeLine.spent }) ?? '0'}`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </p>
       ) : null}
       {unknown ? (
@@ -336,5 +361,78 @@ export function JobRow({
       ) : null}
       {error ? <Callout tone="bad" role="alert">{error}</Callout> : null}
     </li>
+  )
+}
+
+export interface OrchestrationHealthSummary {
+  pausedBotCount: number
+  orphanedTaskCount: number
+}
+
+/**
+ * Fetches `bot.roster` and `task.list` summaries (fail-safe on mocks/errors) and renders
+ * explicit warning callouts when any bot is paused (circuit breaker) or tasks are orphaned.
+ */
+export function OrchestrationHealthBanner({
+  rpc,
+  t,
+  refreshKey,
+}: {
+  rpc: MuweaveRpcClient
+  t: MuweaveTranslator
+  refreshKey?: number
+}) {
+  const [health, setHealth] = useState<OrchestrationHealthSummary>({ pausedBotCount: 0, orphanedTaskCount: 0 })
+
+  useEffect(() => {
+    let cancelled = false
+    void Promise.allSettled([
+      rpc.call<{ bots?: Array<{ state?: string }> }>('bot.roster', {}),
+      rpc.call<{ tasks?: Array<{ status?: string }>; orphanedCount?: number }>('task.list', {}),
+    ]).then(([rosterRes, tasksRes]) => {
+      if (cancelled) return
+      let pausedBotCount = 0
+      if (rosterRes.status === 'fulfilled' && rosterRes.value?.ok && Array.isArray(rosterRes.value.data?.bots)) {
+        pausedBotCount = rosterRes.value.data.bots.filter((b) => b?.state === 'paused').length
+      }
+      let orphanedTaskCount = 0
+      if (tasksRes.status === 'fulfilled' && tasksRes.value?.ok && tasksRes.value.data) {
+        if (typeof tasksRes.value.data.orphanedCount === 'number' && Number.isFinite(tasksRes.value.data.orphanedCount)) {
+          orphanedTaskCount = Math.max(0, tasksRes.value.data.orphanedCount)
+        } else if (Array.isArray(tasksRes.value.data.tasks)) {
+          orphanedTaskCount = tasksRes.value.data.tasks.filter((item) => item?.status === 'orphaned').length
+        }
+      }
+      setHealth({ pausedBotCount, orphanedTaskCount })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [rpc, refreshKey])
+
+  if (health.pausedBotCount === 0 && health.orphanedTaskCount === 0) return null
+
+  const isEn = tr(t, 'langCode') === 'en'
+  return (
+    <div className="mw-stack" data-gap="xs" data-muweave-orchestration-health="true">
+      {health.pausedBotCount > 0 ? (
+        <div data-bot-paused-count={String(health.pausedBotCount)}>
+          <Callout tone="warn" role="status">
+            {isEn
+              ? `Circuit breaker active: ${health.pausedBotCount} bot(s) in paused state.`
+              : `断路器已触发：${health.pausedBotCount} 个 Bot 处于暂停状态（paused）。`}
+          </Callout>
+        </div>
+      ) : null}
+      {health.orphanedTaskCount > 0 ? (
+        <div data-orphaned-task-count={String(health.orphanedTaskCount)}>
+          <Callout tone="warn" role="status">
+            {isEn
+              ? `${health.orphanedTaskCount} orphaned task(s) detected; please reconcile or cancel.`
+              : `检测到 ${health.orphanedTaskCount} 个孤儿任务（orphaned），请核对或取消。`}
+          </Callout>
+        </div>
+      ) : null}
+    </div>
   )
 }

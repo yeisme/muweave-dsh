@@ -36,29 +36,33 @@ function dshEngineVersion() {
 }
 
 const beforeWebFp = await webProfileFingerprint()
-const commandDisplay =
-  'pnpm pack:plugins && unshare -rn sh -c "ip link set lo up && node scripts/inner-e2e-runner.mjs"'
+const isLinux = process.platform === 'linux'
+const innerRunnerPath = path.join(rootDir, 'scripts/inner-e2e-runner.mjs')
+const isolationMode = isLinux ? 'linux-unshare-rn' : 'loopback-offline-profile'
+const commandDisplay = isLinux
+  ? 'pnpm pack:plugins && unshare -rn sh -c "ip link set lo up && node scripts/inner-e2e-runner.mjs"'
+  : `pnpm pack:plugins && node scripts/inner-e2e-runner.mjs # ${isolationMode} (${process.platform})`
 
 let stdout = ''
 let stderr = ''
 
-const child = spawn(
-  'unshare',
-  ['-rn', 'sh', '-c', `ip link set lo up && node "${path.join(rootDir, 'scripts/inner-e2e-runner.mjs')}" "${artifactsDir}"`],
-  {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      CI: '1',
-      NO_COLOR: '1',
-      HTTP_PROXY: '',
-      HTTPS_PROXY: '',
-      ALL_PROXY: '',
-      all_proxy: '',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
+const spawnOpts = {
+  cwd: rootDir,
+  env: {
+    ...process.env,
+    CI: '1',
+    NO_COLOR: '1',
+    HTTP_PROXY: '',
+    HTTPS_PROXY: '',
+    ALL_PROXY: '',
+    all_proxy: '',
   },
-)
+  stdio: ['ignore', 'pipe', 'pipe'],
+}
+
+const child = isLinux
+  ? spawn('unshare', ['-rn', 'sh', '-c', `ip link set lo up && node "${innerRunnerPath}" "${artifactsDir}"`], spawnOpts)
+  : spawn(process.execPath, [innerRunnerPath, artifactsDir], spawnOpts)
 
 child.stdout.on('data', (chunk) => {
   stdout += String(chunk)
@@ -83,7 +87,8 @@ await writeFile(
       node: process.version,
       platform: process.platform,
       dshEngine: dshEngineVersion(),
-      networkNamespaceIsolated: true,
+      networkNamespaceIsolated: isLinux,
+      isolationMode,
       providerCalls: 0,
       webProfileUntouched,
     },
@@ -101,6 +106,7 @@ await writeFile(
       status: passed ? 'passed' : 'failed',
       passed,
       exit_code: passed ? 0 : exitCode || 1,
+      isolation_mode: isolationMode,
       provider_calls: 0,
       web_profile_untouched: webProfileUntouched,
       plugins_verified: [
@@ -109,6 +115,7 @@ await writeFile(
         '@yeisme/dsh-muweave-script',
         '@yeisme/dsh-muweave-drama',
         '@yeisme/dsh-muweave-kit',
+        '@yeisme/dsh-muweave-schedule',
       ],
       viewports_verified: ['1440x900', '1024x768', '768x900', '390x844'],
       evidence_dir: `temp/integration-test-runs/${runId}`,

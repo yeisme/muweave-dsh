@@ -5,7 +5,7 @@ import { ProgressStrip } from './progress-strip'
 import type { MuweaveRpcClient } from './rpc-client'
 import { AmbientBackdrop } from './editorial'
 import { GenerationLauncher } from './generation'
-import { CommandPalette, type CommandPaletteItem } from './command-palette'
+import { CommandPalette, THEATER_QUICK_ROOMS, type CommandPaletteItem } from './command-palette'
 import { useTiltDelegation } from './motion'
 import { getActiveTheaterRoomId, getTheaterRooms, setActiveTheaterRoom, theaterChromeContext } from './theater/registry'
 import type { CapabilityStage, MuweaveIndexV1 } from '../protocol'
@@ -316,7 +316,9 @@ export function WorkspaceShell({
   const paletteItems = useMemo<CommandPaletteItem[]>(() => {
     const items: CommandPaletteItem[] = []
     const activeRoom = getActiveTheaterRoomId()
+    const seenRoomIds = new Set<string>()
     for (const room of getTheaterRooms()) {
+      seenRoomIds.add(room.id)
       items.push({
         id: `room-${room.id}`,
         group: t('commandGroupRooms'),
@@ -324,6 +326,18 @@ export function WorkspaceShell({
         hint: t('paletteFocusRoom'),
         current: room.id === activeRoom,
         run: () => setActiveTheaterRoom(room.id),
+      })
+    }
+    const isEn = t('langCode') === 'en'
+    for (const fallbackRoom of THEATER_QUICK_ROOMS) {
+      if (seenRoomIds.has(fallbackRoom.id)) continue
+      items.push({
+        id: `room-${fallbackRoom.id}`,
+        group: t('commandGroupRooms'),
+        label: isEn ? fallbackRoom.en : fallbackRoom.zh,
+        hint: t('paletteFocusRoom'),
+        current: fallbackRoom.id === activeRoom,
+        run: () => setActiveTheaterRoom(fallbackRoom.id),
       })
     }
     for (const tab of stageTabs) {

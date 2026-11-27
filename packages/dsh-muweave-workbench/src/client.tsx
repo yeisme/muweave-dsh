@@ -10,6 +10,7 @@ import {
   PillButton,
   Poster,
   RoomHero,
+  SHOT_MEDIA_ROLE_LIST,
   SectionHead,
   Segmented,
   ShotGenerateButton,
@@ -17,13 +18,17 @@ import {
   StatusTag,
   WorkspaceShell,
   keyframeDigest,
+  navigateToTheaterRoom,
   openGeneration,
   useGenerationStore,
   shotDescription,
+  shotReadinessSummary,
   statusLabel,
   statusTone,
   useProjectCovers,
   type LinkedMediaRef,
+  type ShotReviewRecordV1,
+  type ShotReviewStatus,
   type WorkspaceNotice,
   publishKnownElementsForTriggers,
   registerMuweaveCreatorPlugin,
@@ -50,7 +55,12 @@ import {
   type ElementGroupBy,
   type StageId,
 } from './stage-map'
-import { toolCatalogIntent, useToolCatalog, type ToolCatalogEntry } from '@yeisme/dsh-muweave-core/client'
+import {
+  toolCatalogIntent,
+  unavailableReasonLabel,
+  useToolCatalog,
+  type ToolCatalogEntry,
+} from '@yeisme/dsh-muweave-core/client'
 
 export const name = '@yeisme/dsh-muweave-workbench'
 export const inject: readonly string[] = ['slots', 'locale', 'sidebarRightTabs']
@@ -114,6 +124,12 @@ const zh = {
   draftObstacle: '阻碍',
   draftTurn: '转折',
   draftSeconds: '秒',
+  draftOpenDrama: '进入分镜台预演',
+  draftReviewDraft: '草稿',
+  draftReviewInReview: '待审',
+  draftReviewNeedsRevision: '需修改',
+  draftReviewApproved: '已通过',
+  draftReviewLocked: '已锁定',
   viewLabel: '总览视图',
   viewByStage: '按阶段',
   viewAll: '全部',
@@ -124,6 +140,18 @@ const zh = {
   groupStatus: '状态',
   groupMedia: '素材',
   groupUnlabeled: '未标注',
+  onboardingEyebrow: '快速上手 · 3 步开拍',
+  onboardingTitle: '欢迎来到幕织片场，先初始化你的创作工作区',
+  onboardingLede: '当前工作区尚未同步到任何 .muweave/ 元件。按下面 3 步完成冷启动，即可进入剧本、视觉与分镜预演闭环。',
+  onboardingStep1Title: '1. 绑定并同步工作区',
+  onboardingStep1Desc: '一键同步采集 .muweave/ 物化索引，或通过绑定引用接入已有项目。',
+  onboardingStep2Title: '2. 导入剧本与视觉资产',
+  onboardingStep2Desc: '在剧本编剧室与 Eikona 视觉台准备场次卡、角色三视图与定妆母版。',
+  onboardingStep3Title: '3. 分镜预演与粗剪导出',
+  onboardingStep3Desc: '前往分镜生产台逐镜审片、播放 Animatic 预演并导出 EDL / Cut Manifest。',
+  onboardingActionSync: '一键同步 .muweave/',
+  onboardingActionBind: '打开绑定引用向导',
+  onboardingActionDrama: '前往分镜生产台',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -181,6 +209,12 @@ const en: Record<keyof typeof zh, string> = {
   draftObstacle: 'Obstacle',
   draftTurn: 'Turn',
   draftSeconds: 's',
+  draftOpenDrama: 'Open Drama Studio',
+  draftReviewDraft: 'Draft',
+  draftReviewInReview: 'In Review',
+  draftReviewNeedsRevision: 'Needs Revision',
+  draftReviewApproved: 'Approved',
+  draftReviewLocked: 'Locked',
   viewLabel: 'Overview view',
   viewByStage: 'By stage',
   viewAll: 'All',
@@ -191,6 +225,18 @@ const en: Record<keyof typeof zh, string> = {
   groupStatus: 'Status',
   groupMedia: 'Media',
   groupUnlabeled: 'Unlabeled',
+  onboardingEyebrow: 'Quick Start · 3 Steps',
+  onboardingTitle: 'Welcome to MuWeave Studio — initialize your workspace',
+  onboardingLede: 'No .muweave/ elements are synced yet. Follow these 3 steps to bootstrap your script, visual, and drama workflow.',
+  onboardingStep1Title: '1. Bind & Sync Workspace',
+  onboardingStep1Desc: 'Sync the .muweave/ materialized bundle or bind an existing project reference.',
+  onboardingStep2Title: '2. Import Script & Visual Assets',
+  onboardingStep2Desc: 'Prepare scene cards in Script room and character/scene masters in Eikona.',
+  onboardingStep3Title: '3. Preview Animatic & Export Rough-Cut',
+  onboardingStep3Desc: 'Open the Drama room to review shots, play the Animatic, and export EDL / Cut Manifest.',
+  onboardingActionSync: 'Sync .muweave/',
+  onboardingActionBind: 'Open Bind Wizard',
+  onboardingActionDrama: 'Go to Drama Room',
 }
 
 export function WorkbenchIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -472,8 +518,65 @@ export function WorkbenchMainPage({
   )
   const groupTitle = (key: string, label: string) =>
     key === UNLABELED_GROUP ? t('groupUnlabeled') : groupBy === 'status' ? statusLabel(key, lang) : label
+  const openBindWizardTab = () => {
+    const tabs = document.querySelectorAll<HTMLButtonElement>('[data-muweave-workspace-root="true"] [role="tab"]')
+    const bindLabel = t('tabBindWizard')
+    for (const tab of tabs) {
+      if (tab.textContent?.trim() === bindLabel) {
+        tab.click()
+        return
+      }
+    }
+  }
+  const openDramaRoom = () => {
+    navigateToTheaterRoom('muweave-drama')
+  }
+  const onboardingCard = (
+    <section className="mw-onboarding-card" data-muweave-onboarding="true" aria-label={t('onboardingTitle')}>
+      <header className="mw-stack" data-gap="xs">
+        <span className="mw-eyebrow">{t('onboardingEyebrow')}</span>
+        <h2 className="mw-title">{t('onboardingTitle')}</h2>
+        <p className="mw-dsh-muted">{t('onboardingLede')}</p>
+      </header>
+      <ol className="mw-onboarding-steps">
+        <li className="mw-onboarding-step">
+          <span className="mw-onboarding-num" aria-hidden="true">01</span>
+          <span className="mw-title">{t('onboardingStep1Title')}</span>
+          <p className="mw-dsh-muted">{t('onboardingStep1Desc')}</p>
+          <div className="mw-onboarding-actions">
+            <button type="button" className="mw-dsh-btn" data-variant="primary" data-size="sm" data-onboarding-action="sync" onClick={() => void syncStage()}>
+              {t('onboardingActionSync')}
+            </button>
+            <button type="button" className="mw-dsh-btn" data-variant="quiet" data-size="sm" data-onboarding-action="bind" onClick={openBindWizardTab}>
+              {t('onboardingActionBind')}
+            </button>
+          </div>
+        </li>
+        <li className="mw-onboarding-step">
+          <span className="mw-onboarding-num" aria-hidden="true">02</span>
+          <span className="mw-title">{t('onboardingStep2Title')}</span>
+          <p className="mw-dsh-muted">{t('onboardingStep2Desc')}</p>
+        </li>
+        <li className="mw-onboarding-step">
+          <span className="mw-onboarding-num" aria-hidden="true">03</span>
+          <span className="mw-title">{t('onboardingStep3Title')}</span>
+          <p className="mw-dsh-muted">{t('onboardingStep3Desc')}</p>
+          <div className="mw-onboarding-actions">
+            <button type="button" className="mw-dsh-btn" data-variant="ghost" data-size="sm" data-onboarding-action="drama" onClick={openDramaRoom}>
+              {t('onboardingActionDrama')}
+            </button>
+          </div>
+        </li>
+      </ol>
+    </section>
+  )
+
   const renderOverview = (onPinCompare: (node: ReactNode) => void) =>
-    overviewMode === 'stage' ? (
+    elements.length === 0 && domainFilter === 'all' ? (
+      <div className="mw-stage-overview" data-muweave-overview-mode="onboarding">
+        {onboardingCard}
+      </div>
+    ) : overviewMode === 'stage' ? (
       <div className="mw-stage-overview" data-muweave-overview-mode="stage">
         <div className="mw-stage-toolbar">{overviewToggle}</div>
         <div className="mw-stage-layout">
@@ -586,6 +689,7 @@ export function WorkbenchMainPage({
   }
   const toolRow = (entry: ToolCatalogEntry) => {
     const intent = toolCatalogIntent(entry)
+    const blockedLabel = intent.kind === 'blocked' ? unavailableReasonLabel(intent.reason, lang) : undefined
     return (
       <li key={entry.id} className="mw-sv-tool" data-tool-id={entry.id} data-availability={entry.availability}>
         <button
@@ -601,7 +705,11 @@ export function WorkbenchMainPage({
           <span>{lang === 'en' ? entry.labelEn : entry.labelZh}</span>
         </button>
         <span className="mw-dsh-muted">{entry.owner}</span>
-        {intent.kind === 'blocked' ? <span className="mw-dsh-muted">{intent.reason}</span> : null}
+        {intent.kind === 'blocked' ? (
+          <span className="mw-chip" data-reason={intent.reason} title={intent.reason}>
+            {blockedLabel}
+          </span>
+        ) : null}
       </li>
     )
   }
@@ -838,10 +946,34 @@ interface DraftBoard {
 interface DraftData {
   scenes: DraftScene[]
   boards: DraftBoard[]
+  reviewsByShot: Record<string, ShotReviewRecordV1>
   timelineTitle?: string
 }
 
 const DRAFT_STAGES = ['visual', 'storyboard', 'sound'] as const
+
+const DRAFT_REVIEW_TONE: Record<ShotReviewStatus, 'neutral' | 'info' | 'warn' | 'ok'> = {
+  draft: 'neutral',
+  in_review: 'info',
+  needs_revision: 'warn',
+  approved: 'ok',
+  locked: 'ok',
+}
+
+function draftReviewLabel(status: ShotReviewStatus, t: (k: string) => string): string {
+  switch (status) {
+    case 'in_review':
+      return t('draftReviewInReview')
+    case 'needs_revision':
+      return t('draftReviewNeedsRevision')
+    case 'approved':
+      return t('draftReviewApproved')
+    case 'locked':
+      return t('draftReviewLocked')
+    default:
+      return t('draftReviewDraft')
+  }
+}
 
 async function loadDraft(rpc: MuweaveRpcClient): Promise<DraftData> {
   const list = async (kind: string) => {
@@ -852,7 +984,25 @@ async function loadDraft(rpc: MuweaveRpcClient): Promise<DraftData> {
     const res = await rpc.call<{ element: MuweaveElementV1 }>('bundle.element.get', { elementId: el.elementId })
     return (res.ok ? res.data.element.payload : {}) as Record<string, unknown>
   }
-  const [cards, tables, timelines] = await Promise.all([list('script.scene_card'), list('drama.storyboard_table'), list('script.timeline')])
+  const loadReviews = async (): Promise<Record<string, ShotReviewRecordV1>> => {
+    try {
+      const res = await rpc.call<{ reviews?: ShotReviewRecordV1[] }>('drama.shot.review.list', {})
+      if (!res?.ok || !Array.isArray(res.data?.reviews)) return {}
+      const map: Record<string, ShotReviewRecordV1> = {}
+      for (const rec of res.data.reviews) {
+        if (rec && typeof rec.shotRef === 'string') map[rec.shotRef] = rec
+      }
+      return map
+    } catch {
+      return {}
+    }
+  }
+  const [cards, tables, timelines, reviewsByShot] = await Promise.all([
+    list('script.scene_card'),
+    list('drama.storyboard_table'),
+    list('script.timeline'),
+    loadReviews(),
+  ])
   const scenes = await Promise.all(
     cards.map(async (el): Promise<DraftScene> => {
       const pl = await payload(el)
@@ -863,11 +1013,11 @@ async function loadDraft(rpc: MuweaveRpcClient): Promise<DraftData> {
   const boards = await Promise.all(
     tables.map(async (el): Promise<DraftBoard> => ({ el, rows: ((await payload(el)).rows as DraftShotRow[] | undefined) ?? [] })),
   )
-  return { scenes, boards, timelineTitle: timelines[0]?.title }
+  return { scenes, boards, reviewsByShot, timelineTitle: timelines[0]?.title }
 }
 
 export function WorkbenchDraftPage({ rpc, t, coreT }: { rpc: MuweaveRpcClient; t: (k: string) => string; coreT: MuweaveTranslator }) {
-  const [data, setData] = useState<DraftData>({ scenes: [], boards: [] })
+  const [data, setData] = useState<DraftData>({ scenes: [], boards: [], reviewsByShot: {} })
   const load = useCallback(async () => setData(await loadDraft(rpc)), [rpc])
   const mediaRevision = useGenerationStore().mediaRevision ?? 0
   useEffect(() => {
@@ -941,6 +1091,8 @@ export function WorkbenchDraftPage({ rpc, t, coreT }: { rpc: MuweaveRpcClient; t
           <div className="mw-board">
             {b.rows.map((row) => {
               const n = String(row.order).padStart(2, '0')
+              const reviewStatus: ShotReviewStatus = data.reviewsByShot[row.shotRef]?.status ?? 'draft'
+              const readiness = shotReadinessSummary(row.linkedMedia)
               return (
                 <MediaCard
                   key={row.shotRef}
@@ -950,8 +1102,34 @@ export function WorkbenchDraftPage({ rpc, t, coreT }: { rpc: MuweaveRpcClient; t
                     <ShotMedia rpc={rpc} linked={row.linkedMedia} alt={`${n} ${row.shotRef}`} poster={<Poster title={n} meta={row.sceneRef} />} />
                   }
                   title={`${n} · ${(row.plannedDurationMicros / 1_000_000).toFixed(1)} ${t('draftSeconds')}`}
-                  meta={<span className="mw-dsh-code">{row.shotRef}</span>}
+                  meta={
+                    <span className="mw-row" data-gap="xs">
+                      <span className="mw-dsh-code">{row.shotRef}</span>
+                      <span
+                        className="mw-status"
+                        data-tone={DRAFT_REVIEW_TONE[reviewStatus]}
+                        data-draft-review-status={reviewStatus}
+                      >
+                        <span className="mw-dot" />
+                        {draftReviewLabel(reviewStatus, t)}
+                      </span>
+                    </span>
+                  }
                 >
+                  <div className="mw-row" data-gap="xs" data-draft-readiness={row.shotRef}>
+                    <span className="dr-role-dots mw-row" data-gap="xs" data-role-readiness={`${readiness.filledCount}/6`}>
+                      {SHOT_MEDIA_ROLE_LIST.map((role) => (
+                        <span
+                          key={role}
+                          className="dr-role-dot"
+                          data-role={role}
+                          data-filled={readiness.rolesPresent.has(role) ? 'true' : 'false'}
+                          title={role}
+                        />
+                      ))}
+                    </span>
+                    <span className="mw-dsh-muted">{`${readiness.filledCount}/6`}</span>
+                  </div>
                   <ShotGenerateButton
                     t={coreT}
                     shotRef={row.shotRef}
@@ -974,6 +1152,18 @@ export function WorkbenchDraftPage({ rpc, t, coreT }: { rpc: MuweaveRpcClient; t
       t={coreT}
       stage={DRAFT_STAGES}
       onSyncRequested={load}
+      headerActions={
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-variant="quiet"
+          data-size="sm"
+          data-draft-open-drama="true"
+          onClick={() => navigateToTheaterRoom('muweave-drama')}
+        >
+          {t('draftOpenDrama')}
+        </button>
+      }
       hero={
         <RoomHero
           eyebrow={t('draftEyebrow')}

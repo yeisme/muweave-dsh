@@ -105,7 +105,7 @@ function LogRow({
     </li>
   )
 }
-import { toolCatalogIntent, useToolCatalog, type ToolCatalogEntry } from './tool-catalog'
+import { toolCatalogIntent, unavailableReasonLabel, useToolCatalog, type ToolCatalogEntry } from './tool-catalog'
 import { openGeneration } from './generation-store'
 
 
@@ -222,7 +222,11 @@ export function DramaSessionView({ rpc, t, sessionId, onOpenTheater }: DramaSess
           <span>{label}</span>
         </button>
         <span className="mw-dsh-muted">{entry.owner}</span>
-        {intent.kind === 'blocked' ? <span className="mw-dsh-muted">{intent.reason}</span> : null}
+        {intent.kind === 'blocked' ? (
+          <span className="mw-chip" data-reason={intent.reason} title={intent.reason}>
+            {unavailableReasonLabel(intent.reason, lang)}
+          </span>
+        ) : null}
       </li>
     )
   }

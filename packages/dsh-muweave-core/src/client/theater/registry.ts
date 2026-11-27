@@ -1,4 +1,4 @@
-import { createContext, type ComponentType, type Context, type ReactNode } from 'react'
+import { createContext, useSyncExternalStore, type ComponentType, type Context, type ReactNode } from 'react'
 
 /**
  * Cross-bundle theater state. Every MuWeave plugin bundles its own copy of core, so the room
@@ -48,12 +48,20 @@ interface SeatQueue {
   release?: () => void
 }
 
+export type TheaterRoomBadgeTone = 'info' | 'warn' | 'bad'
+
+export interface TheaterRoomBadge {
+  count: number
+  tone?: TheaterRoomBadgeTone
+}
+
 interface TheaterHolder {
   v: 1
   nextId: number
   rooms: Map<string, TheaterRoom>
   roomsSnapshot: readonly TheaterRoom[]
   activeRoomId: string | null
+  badges: Readonly<Record<string, TheaterRoomBadge>>
   queues: Map<string, SeatQueue>
   listeners: Set<() => void>
   chrome: Context<TheaterChrome | null>
@@ -80,6 +88,7 @@ function holder(): TheaterHolder {
       rooms: new Map(),
       roomsSnapshot: [],
       activeRoomId: readStoredRoom(),
+      badges: {},
       queues: new Map(),
       listeners: new Set(),
       chrome: createContext<TheaterChrome | null>(null),
@@ -140,6 +149,49 @@ export function setActiveTheaterRoom(roomId: string): void {
     // Storage may be unavailable (private mode); the choice still holds for this page.
   }
   notify()
+}
+
+/** Navigate to a theater room by id (wraps `setActiveTheaterRoom`). */
+export function navigateToTheaterRoom(roomId: string): void {
+  if (!roomId) return
+  setActiveTheaterRoom(roomId)
+}
+
+export function getTheaterRoomBadges(): Readonly<Record<string, TheaterRoomBadge>> {
+  const h = holder()
+  if (!h.badges) h.badges = {}
+  return h.badges
+}
+
+/** Publish partial room badge counts (e.g. needs_revision shots) for theater navigation pills. */
+export function publishTheaterRoomBadges(
+  partial: Partial<Record<string, TheaterRoomBadge | undefined>>,
+): void {
+  const h = holder()
+  const prev = h.badges ?? {}
+  let changed = false
+  const next: Record<string, TheaterRoomBadge> = { ...prev }
+  for (const [roomId, badge] of Object.entries(partial)) {
+    if (!badge || badge.count <= 0) {
+      if (roomId in next) {
+        delete next[roomId]
+        changed = true
+      }
+    } else {
+      const existing = next[roomId]
+      if (!existing || existing.count !== badge.count || existing.tone !== badge.tone) {
+        next[roomId] = { count: badge.count, ...(badge.tone ? { tone: badge.tone } : {}) }
+        changed = true
+      }
+    }
+  }
+  if (!changed) return
+  h.badges = next
+  notify()
+}
+
+export function useTheaterRoomBadges(): Readonly<Record<string, TheaterRoomBadge>> {
+  return useSyncExternalStore(subscribeTheater, getTheaterRoomBadges, getTheaterRoomBadges)
 }
 
 export function roomIdForDomain(domain: string | undefined): string | undefined {

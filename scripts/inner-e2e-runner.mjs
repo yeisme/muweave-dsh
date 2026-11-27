@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import http from 'node:http'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -214,9 +215,18 @@ try {
   }
   process.stdout.write('DSH host booted cleanly on loopback with 0 activation warnings.\n')
 
-  // 5. Launch real Chrome via Playwright and verify all 5 plugins + multi-breakpoint invariants
+  // 5. Launch real Chrome via Playwright and verify all 6 plugins + multi-breakpoint invariants
+  const chromeCandidates = [
+    process.env.CHROME_PATH,
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].filter(Boolean)
+  const executablePath = chromeCandidates.find((candidate) => existsSync(candidate))
   browser = await chromium.launch({
-    executablePath: '/usr/bin/google-chrome',
+    ...(executablePath ? { executablePath } : {}),
     headless: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   })
@@ -377,6 +387,24 @@ try {
   if (legacyNavCount !== 0) {
     throw new Error(`Legacy per-plugin sidebar entries still registered (${legacyNavCount})`)
   }
+  // Newer DSH builds show a one-time preview notice modal ("预览版说明") on a fresh profile,
+  // which marks the main shell `inert` until acknowledged. Dismiss any visible startup dialog cleanly.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const dialog = page.locator('[role="dialog"], [aria-modal="true"]').first()
+    if ((await dialog.count()) === 0 || !(await dialog.isVisible())) break
+    const ackBtn = dialog
+      .getByRole('button', { name: /知道了|我已知晓|继续|确定|开始|关闭|Got it|Continue|OK|Close|Dismiss/i })
+      .first()
+    const fallbackBtn = dialog.locator('button:not([disabled])').last()
+    if ((await ackBtn.count()) > 0 && (await ackBtn.isVisible())) {
+      await ackBtn.click()
+    } else if ((await fallbackBtn.count()) > 0 && (await fallbackBtn.isVisible())) {
+      await fallbackBtn.click()
+    } else {
+      await page.keyboard.press('Escape')
+    }
+    await page.waitForTimeout(300)
+  }
   await theaterNav.click()
   await page.locator('[data-muweave-workspace-root="true"]').waitFor({ state: 'visible', timeout: 10_000 })
   process.stdout.write('Verified a single 做剧剧场 sidebar entry opens the theater.\n')
@@ -459,6 +487,46 @@ try {
     if (i > 0) await enterRoom(room, i === roomExpectations.length - 1 ? 'menu' : 'nav')
     else await page.getByText(room.verifyTextRe).first().waitFor({ state: 'visible', timeout: 10_000 })
     await page.locator('[data-muweave-hero="true"]').first().waitFor({ state: 'visible', timeout: 5_000 })
+    if (room.name === 'workbench') {
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: path.join(artifactsDir, 'workbench-panel-1440x900.png') })
+      // v5/v6: capture '?' Shortcuts Help Modal at 1440x900 and close cleanly with Escape
+      const shortcutsBtn = page.locator('[data-muweave-shortcuts-btn="true"]').first()
+      if ((await shortcutsBtn.count()) > 0 && (await shortcutsBtn.isVisible())) {
+        await shortcutsBtn.click()
+        const modal = page.locator('[data-muweave-shortcuts-modal="true"]').first()
+        await modal.waitFor({ state: 'visible', timeout: 5_000 })
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(artifactsDir, 'shortcuts-modal-1440x900.png') })
+        await page.keyboard.press('Escape')
+        await modal.waitFor({ state: 'detached', timeout: 5_000 })
+      }
+      // v6: open GenerationDrawer and capture Orchestration & Circuit Breaker tab at 1440x900
+      const genTopBtn = page.getByRole('button', { name: /^(生成|Generate)$/ }).first()
+      if ((await genTopBtn.count()) > 0 && (await genTopBtn.isVisible())) {
+        await genTopBtn.click()
+        const genDrawer = page.locator('[data-muweave-generation-drawer="true"]').first()
+        await genDrawer.waitFor({ state: 'visible', timeout: 5_000 })
+        const orchTab = genDrawer.locator('[data-generation-drawer-tab="orchestration"]').first()
+        if ((await orchTab.count()) > 0 && (await orchTab.isVisible())) {
+          await orchTab.click()
+          await page.waitForTimeout(300)
+          await page.screenshot({ path: path.join(artifactsDir, 'orchestration-drawer-1440x900.png') })
+        }
+        const closeGenBtn = genDrawer.getByRole('button', { name: /关闭生成台|Close generation desk/ }).first()
+        if ((await closeGenBtn.count()) > 0) {
+          await closeGenBtn.click()
+          await genDrawer.waitFor({ state: 'detached', timeout: 5_000 })
+        }
+      }
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.waitForTimeout(250)
+      await page.screenshot({ path: path.join(artifactsDir, 'workbench-panel-390x844.png') })
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.waitForTimeout(200)
+      process.stdout.write(`Verified theater room [${room.name}] rendered .muweave/ elements (1440x900 + 390x844).\n`)
+      continue
+    }
     if (room.name === 'drama') {
       // Work-first: the shot board is the default view; the table sits behind the view switch.
       await page.locator('[data-drama-shot-board="true"]').first().waitFor({ state: 'visible', timeout: 5_000 })
@@ -466,6 +534,73 @@ try {
         throw new Error('Drama shot board rendered no shot cards')
       }
       process.stdout.write('Verified drama shot board is the default storyboard view.\n')
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: path.join(artifactsDir, 'drama-panel-1440x900.png') })
+      await page.screenshot({ path: path.join(artifactsDir, 'drama-storyboard-1440x900.png') })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.waitForTimeout(250)
+      await page.screenshot({ path: path.join(artifactsDir, 'drama-storyboard-390x844.png') })
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.waitForTimeout(200)
+
+      // v5/v6: capture ShotInspector open with bottom .dr-filmstrip on shot 01
+      const shotInspectBtn = page
+        .getByRole('button', { name: /检查 shot:ep01:s01:01|Inspect shot:ep01:s01:01/ })
+        .first()
+      if ((await shotInspectBtn.count()) > 0 && (await shotInspectBtn.isVisible())) {
+        await shotInspectBtn.click()
+        const filmstrip = page.locator('[data-inspector-filmstrip="true"]').first()
+        await filmstrip.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => undefined)
+        await page.waitForTimeout(300)
+        await page.screenshot({ path: path.join(artifactsDir, 'drama-inspector-open-1440x900.png') })
+      }
+
+      // Capture Animatic + ShotInspector views at 1440x900 and 390x844 when present
+      const animaticBtn = page.getByRole('button', { name: /展开 Animatic|Open Animatic/ }).first()
+      if ((await animaticBtn.count()) > 0 && (await animaticBtn.isVisible())) {
+        await animaticBtn.click()
+        await page.waitForTimeout(250)
+      }
+      await page.screenshot({ path: path.join(artifactsDir, 'drama-inspector-animatic-1440x900.png') })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.waitForTimeout(250)
+      await page.screenshot({ path: path.join(artifactsDir, 'drama-inspector-animatic-390x844.png') })
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.waitForTimeout(200)
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(150)
+
+      // Capture Timeline tab at 1440x900 and 390x844
+      const timelineTab = page.getByRole('tab', { name: /剪辑时间线|Edit Timeline/ }).first()
+      if ((await timelineTab.count()) > 0) {
+        await timelineTab.click()
+        await page.waitForTimeout(300)
+        await page.screenshot({ path: path.join(artifactsDir, 'drama-timeline-1440x900.png') })
+        await page.setViewportSize({ width: 390, height: 844 })
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(artifactsDir, 'drama-timeline-390x844.png') })
+        await page.setViewportSize({ width: 1440, height: 900 })
+        await page.waitForTimeout(200)
+        const storyboardTab = page.getByRole('tab', { name: /分镜表|Storyboard/ }).first()
+        if ((await storyboardTab.count()) > 0) await storyboardTab.click()
+        await page.waitForTimeout(150)
+      }
+      process.stdout.write(`Verified theater room [${room.name}] rendered storyboard, inspector/animatic, and timeline (1440x900 + 390x844).\n`)
+      continue
+    }
+    if (room.name === 'kit') {
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: path.join(artifactsDir, 'kit-panel-1440x900.png') })
+      // v5/v6: capture CLI & MCP Integration Guide card inside CLI 操作卡 tab
+      const cliTab = page.getByRole('tab', { name: /CLI 操作卡|CLI Cards/ }).first()
+      if ((await cliTab.count()) > 0 && (await cliTab.isVisible())) {
+        await cliTab.click()
+        await page.locator('[data-kit-mcp-card="true"]').first().waitFor({ state: 'visible', timeout: 5_000 })
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(artifactsDir, 'kit-cli-mcp-1440x900.png') })
+      }
+      process.stdout.write(`Verified theater room [${room.name}] rendered templates and CLI & MCP guide.\n`)
+      continue
     }
     await page.waitForTimeout(300)
     await page.screenshot({ path: path.join(artifactsDir, `${room.name}-panel-1440x900.png`) })

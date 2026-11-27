@@ -36,6 +36,7 @@ import {
 } from './project-scope'
 import {
   BACKLOG_PANEL_ID,
+  ScheduleCalendarHeader,
   ScheduleProjectBar,
   ScheduleToolbar,
   activeProjectFromList,
@@ -107,6 +108,16 @@ const zh = {
   othersGroupTitle: '其它项目',
   unknownChipSuffix: '归属未知',
   othersChipSuffix: '其它项目',
+  calPrevShort: '< 上月',
+  calNextShort: '下月 >',
+  calBackToToday: '回到今天',
+  calPlannedCount: '本月已排 {n} 项',
+  backlogSearchPlaceholder: '搜索待排条目…',
+  backlogFilterAll: '全部',
+  backlogFilterVisual: '视觉',
+  backlogFilterScript: '剧本',
+  backlogFilterDrama: '分镜',
+  backlogFilterEmpty: '没有匹配的待排条目。',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -164,6 +175,16 @@ const en: Record<keyof typeof zh, string> = {
   othersGroupTitle: 'Other projects',
   unknownChipSuffix: 'unknown ownership',
   othersChipSuffix: 'other project',
+  calPrevShort: '< Prev',
+  calNextShort: 'Next >',
+  calBackToToday: 'Today',
+  calPlannedCount: '{n} planned this month',
+  backlogSearchPlaceholder: 'Search backlog…',
+  backlogFilterAll: 'All',
+  backlogFilterVisual: 'Visual',
+  backlogFilterScript: 'Script',
+  backlogFilterDrama: 'Storyboard',
+  backlogFilterEmpty: 'No matching backlog items.',
 }
 
 export function ScheduleIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -247,6 +268,22 @@ function chipTone(ownership: ScheduleEntryOwnership | undefined, overdue: boolea
   return ownership === 'mine' ? 'info' : 'neutral'
 }
 
+type BacklogDomainFilter = 'all' | 'eikona' | 'script' | 'drama'
+
+const BACKLOG_DOMAIN_FILTERS: ReadonlyArray<{ id: BacklogDomainFilter; labelKey: string }> = [
+  { id: 'all', labelKey: 'backlogFilterAll' },
+  { id: 'eikona', labelKey: 'backlogFilterVisual' },
+  { id: 'script', labelKey: 'backlogFilterScript' },
+  { id: 'drama', labelKey: 'backlogFilterDrama' },
+]
+
+function matchesBacklogDomain(kind: string, domain: BacklogDomainFilter): boolean {
+  if (domain === 'all') return true
+  if (domain === 'eikona') return kind.startsWith('eikona.')
+  if (domain === 'script') return kind.startsWith('auctra.') || kind.startsWith('script.') || kind === 'scene'
+  return kind.startsWith('drama.') || kind === 'shot'
+}
+
 /* ---------------------------------- main page ---------------------------------- */
 
 export function ScheduleMainPage({
@@ -277,6 +314,8 @@ export function ScheduleMainPage({
   /** Elements read from the active project's own workspaces, tagged with where they came from. */
   const [projectElements, setProjectElements] = useState<{ workspaceId: string; element: MuweaveElementSummaryV1 }[]>([])
   const [showOthers, setShowOthers] = useState(false)
+  const [backlogQuery, setBacklogQuery] = useState('')
+  const [backlogDomain, setBacklogDomain] = useState<BacklogDomainFilter>('all')
   const [selectedRef, setSelectedRef] = useState<string | undefined>(undefined)
   const [notice, setNotice] = useState<WorkspaceNotice | null>(null)
   const [note, setNote] = useState('')
@@ -589,6 +628,22 @@ export function ScheduleMainPage({
   )
 
   const backlogEmpty = backlogGroups.mine.length + backlogGroups.unknown.length + backlogGroups.others.length === 0
+  const normalizedBacklogQuery = backlogQuery.trim().toLowerCase()
+  const filterBacklogRows = (rows: readonly BacklogRow[]) =>
+    rows.filter((row) => {
+      if (!matchesBacklogDomain(row.kind, backlogDomain)) return false
+      if (!normalizedBacklogQuery) return true
+      return (
+        row.label.toLowerCase().includes(normalizedBacklogQuery) ||
+        row.ref.toLowerCase().includes(normalizedBacklogQuery) ||
+        kindLabel(row.kind).toLowerCase().includes(normalizedBacklogQuery)
+      )
+    })
+  const filteredMine = filterBacklogRows(backlogGroups.mine)
+  const filteredUnknown = filterBacklogRows(backlogGroups.unknown)
+  const filteredOthers = showOthers ? filterBacklogRows(backlogGroups.others) : []
+  const filteredBacklogCount = filteredMine.length + filteredUnknown.length + filteredOthers.length
+  const calHeaderTitle = lang === 'en' ? monthLabel : `${cursor.year} 年 ${cursor.month0 + 1} 月`
 
   const backlogPanelNode = (
     <aside
@@ -612,6 +667,35 @@ export function ScheduleMainPage({
           </PillButton>
         ) : null}
       </div>
+      <div className="sched-backlog-filter mw-stack" data-gap="xs" data-schedule-backlog-filter="true">
+        <input
+          type="search"
+          className="mw-input"
+          aria-label={t('backlogSearchPlaceholder')}
+          placeholder={t('backlogSearchPlaceholder')}
+          value={backlogQuery}
+          onChange={(ev) => setBacklogQuery(ev.target.value)}
+        />
+        <div className="mw-row" data-gap="xs" role="group" aria-label={t('backlogTitle')}>
+          {BACKLOG_DOMAIN_FILTERS.map((f) => {
+            const active = backlogDomain === f.id
+            return (
+              <button
+                key={f.id}
+                type="button"
+                className="mw-dsh-btn"
+                data-size="sm"
+                data-variant={active ? 'primary' : 'quiet'}
+                data-domain={f.id}
+                aria-pressed={active}
+                onClick={() => setBacklogDomain(f.id)}
+              >
+                {t(f.labelKey)}
+              </button>
+            )
+          })}
+        </div>
+      </div>
       {legacyCount > 0 ? (
         <p className="mw-sched-legacy" data-muweave-schedule-legacy={legacyCount}>
           {tf('legacyEntriesHint', { count: String(legacyCount) })}
@@ -623,22 +707,24 @@ export function ScheduleMainPage({
           <span>{t('backlogEmpty')}</span>{' '}
           <PillButton icon="sync" onClick={() => void loadElements()}>{t('syncEmptyAction')}</PillButton>
         </EmptyState>
+      ) : filteredBacklogCount === 0 ? (
+        <EmptyState icon="inbox">{t('backlogFilterEmpty')}</EmptyState>
       ) : (
         <ul className="mw-sched-backlog" data-muweave-schedule-backlog="true">
-          {backlogGroups.mine.map((row) => renderBacklogRow(row, 'mine'))}
-          {backlogGroups.unknown.length > 0 ? (
+          {filteredMine.map((row) => renderBacklogRow(row, 'mine'))}
+          {filteredUnknown.length > 0 ? (
             <li className="mw-sched-group" data-ownership="unknown">
               <span className="mw-sched-group-title">{t('unknownGroupTitle')}</span>
               <span className="mw-dsh-muted">{t('unknownOwnershipHint')}</span>
             </li>
           ) : null}
-          {backlogGroups.unknown.map((row) => renderBacklogRow(row, 'unknown'))}
-          {showOthers && backlogGroups.others.length > 0 ? (
+          {filteredUnknown.map((row) => renderBacklogRow(row, 'unknown'))}
+          {showOthers && filteredOthers.length > 0 ? (
             <li className="mw-sched-group" data-ownership="others">
               <span className="mw-sched-group-title">{t('othersGroupTitle')}</span>
             </li>
           ) : null}
-          {showOthers ? backlogGroups.others.map((row) => renderBacklogRow(row, 'others')) : null}
+          {showOthers ? filteredOthers.map((row) => renderBacklogRow(row, 'others')) : null}
         </ul>
       )}
       {selectedRow ? (
@@ -713,6 +799,14 @@ export function ScheduleMainPage({
                 {backlogPanel.open ? backlogPanelNode : null}
 
                 <section className="mw-sched-main mw-stack" data-gap="sm">
+                  <ScheduleCalendarHeader
+                    monthTitle={calHeaderTitle}
+                    plannedCountLabel={tf('calPlannedCount', { n: String(monthEntries.length) })}
+                    onPrev={() => goTo(addMonths(focusedDay, -1))}
+                    onToday={() => goTo(today)}
+                    onNext={() => goTo(addMonths(focusedDay, 1))}
+                    t={t}
+                  />
                   <div className="mw-sched-weekhead" style={{ gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }} aria-hidden="true">
                     {weekday.map((d) => (
                       <span key={d}>{d}</span>

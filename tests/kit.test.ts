@@ -121,6 +121,7 @@ describe('@yeisme/dsh-muweave-kit PTC preset parity, scoped runtime skills, and 
     )
 
     expect(registeredSkills).toEqual(MUWEAVE_RUNTIME_SKILLS.map((s) => s.name))
+    expect(registeredSkills).toContain('muweave-cli-mcp-assist')
     for (const s of registeredSkills) {
       expect(s).toMatch(/^[a-z0-9-]+$/)
     }
@@ -138,6 +139,10 @@ describe('@yeisme/dsh-muweave-kit PTC preset parity, scoped runtime skills, and 
       'muweave_schedule_list',
       'muweave_schedule_plan',
       'muweave_schedule_clear',
+      'muweave_drama_shots_list',
+      'muweave_drama_review_set',
+      'muweave_drama_export',
+      'muweave_project_diagnose',
     ])
     expect(registeredTools.some((n) => /approve/i.test(n))).toBe(false)
   })

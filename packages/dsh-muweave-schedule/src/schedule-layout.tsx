@@ -134,6 +134,66 @@ export function ScheduleToolbar({
   )
 }
 
+/** Crisp navigation header directly above the month calendar grid. */
+export function ScheduleCalendarHeader({
+  monthTitle,
+  plannedCountLabel,
+  onPrev,
+  onToday,
+  onNext,
+  t,
+}: {
+  monthTitle: string
+  plannedCountLabel: string
+  onPrev: () => void
+  onToday: () => void
+  onNext: () => void
+  t: Translate
+}) {
+  return (
+    <div className="sched-cal-header" data-schedule-cal-header="true">
+      <div className="mw-row" data-gap="xs">
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-variant="quiet"
+          data-size="sm"
+          data-sched-cal-prev="true"
+          onClick={onPrev}
+        >
+          {t('calPrevShort')}
+        </button>
+        <strong className="mw-sched-cal-title" aria-live="polite" data-sched-cal-title="true">
+          {monthTitle}
+        </strong>
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-variant="quiet"
+          data-size="sm"
+          data-sched-cal-next="true"
+          onClick={onNext}
+        >
+          {t('calNextShort')}
+        </button>
+        <button
+          type="button"
+          className="mw-dsh-btn"
+          data-variant="ghost"
+          data-size="sm"
+          data-sched-cal-today="true"
+          onClick={onToday}
+        >
+          {t('calBackToToday')}
+        </button>
+      </div>
+      <span className="mw-chip" data-sched-cal-count="true">
+        {plannedCountLabel}
+      </span>
+    </div>
+  )
+}
+
 function readBacklogPreference(): boolean {
   try {
     return globalThis.localStorage?.getItem(BACKLOG_STORAGE_KEY) !== 'collapsed'

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import {
   CompanionList,
   CoverCollage,
@@ -14,6 +14,7 @@ import {
   Segmented,
   StatusTag,
   WorkspaceShell,
+  navigateToTheaterRoom,
   type WorkspaceNotice,
   registerMuweaveCreatorPlugin,
   stageItemToFloatingAgent,
@@ -68,6 +69,16 @@ const zh = {
   statMasters: '母版',
   statScores: '分卡',
   referGroup: '引用整组',
+  bindToShot: '绑定到分镜',
+  bindShotSelect: '目标镜头',
+  bindRoleSelect: '媒体角色',
+  roleKeyframe: '关键帧',
+  roleReference: '参考图',
+  boundToShotDone: '已绑定到镜头',
+  openInDrama: '去分镜台查看',
+  gallerySearchPlaceholder: '搜索候选 ID / 提示词 / 角色…',
+  galleryFilterAll: '全部状态',
+  galleryNoMatch: '当前筛选条件下无视觉候选',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -106,6 +117,16 @@ const en: Record<keyof typeof zh, string> = {
   statMasters: 'masters',
   statScores: 'scorecards',
   referGroup: 'Refer group',
+  bindToShot: 'Bind to Shot',
+  bindShotSelect: 'Target Shot',
+  bindRoleSelect: 'Media Role',
+  roleKeyframe: 'Keyframe',
+  roleReference: 'Reference',
+  boundToShotDone: 'Bound to shot',
+  openInDrama: 'View in Production',
+  gallerySearchPlaceholder: 'Search artifact, prompt, handle…',
+  galleryFilterAll: 'All Statuses',
+  galleryNoMatch: 'No candidates match this filter',
 }
 
 export function EikonaIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -177,6 +198,13 @@ function CandidateMediaPreview({
   return <MediaPreview rpc={rpc} sha256={sha256} alt={alt} pendingLabel={t('previewPending')} emptyLabel={t('noPreview')} />
 }
 
+interface ShotOption {
+  shotRef: string
+  sceneRef: string
+  order: number
+  episodeRef?: string
+}
+
 export function EikonaMainPage({
   rpc,
   t,
@@ -188,6 +216,7 @@ export function EikonaMainPage({
 }) {
   const [elements, setElements] = useState<MuweaveElementSummaryV1[]>([])
   const [details, setDetails] = useState<Record<string, MuweaveElementV1>>({})
+  const [shotOptions, setShotOptions] = useState<ShotOption[]>([])
   const [gridCols, setGridCols] = useState<2 | 4>(4)
   const [zoomed, setZoomed] = useState(false)
   const [notice, setNotice] = useState<WorkspaceNotice | null>(null)
@@ -195,24 +224,59 @@ export function EikonaMainPage({
   const [specSize, setSpecSize] = useState('1152x2048')
   const [specQuality, setSpecQuality] = useState('high')
   const [specResult, setSpecResult] = useState<string>('')
+  const [galleryQuery, setGalleryQuery] = useState('')
+  const [galleryStatus, setGalleryStatus] = useState<string>('all')
+  const [bindTargetByCand, setBindTargetByCand] = useState<Record<string, { shotRef: string; role: 'keyframe' | 'reference' }>>({})
+  const [bindingCandId, setBindingCandId] = useState<string | null>(null)
+  const [lastBoundShot, setLastBoundShot] = useState<{ shotRef: string; artifactId: string; role: string } | null>(null)
   const lang = coreT('langCode')
   const covers = useProjectCovers(rpc, 3)
 
   const loadEikona = useCallback(async () => {
-    const res = await rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { domain: 'eikona' })
-    if (!res.ok) return
-    setElements(res.data.elements)
-    const detailEntries = await Promise.all(
-      res.data.elements.slice(0, 12).map(async (el) => {
-        const d = await rpc.call<{ element: MuweaveElementV1 }>('bundle.element.get', { elementId: el.elementId })
-        return d.ok ? ([el.elementId, d.data.element] as const) : undefined
-      }),
-    )
-    const map: Record<string, MuweaveElementV1> = {}
-    for (const pair of detailEntries) {
-      if (pair) map[pair[0]] = pair[1]
+    const [res, sbRes] = await Promise.all([
+      rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { domain: 'eikona' }),
+      rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { kind: 'drama.storyboard_table' }),
+    ])
+    if (res.ok) {
+      setElements(res.data.elements)
+      const detailEntries = await Promise.all(
+        res.data.elements.slice(0, 12).map(async (el) => {
+          const d = await rpc.call<{ element: MuweaveElementV1 }>('bundle.element.get', { elementId: el.elementId })
+          return d.ok ? ([el.elementId, d.data.element] as const) : undefined
+        }),
+      )
+      const map: Record<string, MuweaveElementV1> = {}
+      for (const pair of detailEntries) {
+        if (pair) map[pair[0]] = pair[1]
+      }
+      setDetails(map)
     }
-    setDetails(map)
+    if (sbRes.ok && Array.isArray(sbRes.data?.elements)) {
+      const sbDetails = await Promise.all(
+        sbRes.data.elements.slice(0, 4).map(async (sb) => {
+          const d = await rpc.call<{ element: MuweaveElementV1 }>('bundle.element.get', { elementId: sb.elementId })
+          return d.ok ? { sb, element: d.data.element } : undefined
+        }),
+      )
+      const opts: ShotOption[] = []
+      const seen = new Set<string>()
+      for (const item of sbDetails) {
+        if (!item) continue
+        const rows = ((item.element.payload ?? {}) as { rows?: Array<{ shotRef?: string; sceneRef?: string; order?: number }> }).rows ?? []
+        for (const row of rows) {
+          if (typeof row.shotRef === 'string' && row.shotRef && !seen.has(row.shotRef)) {
+            seen.add(row.shotRef)
+            opts.push({
+              shotRef: row.shotRef,
+              sceneRef: typeof row.sceneRef === 'string' ? row.sceneRef : '',
+              order: typeof row.order === 'number' ? row.order : opts.length + 1,
+              episodeRef: item.sb.sourceRef,
+            })
+          }
+        }
+      }
+      setShotOptions(opts)
+    }
   }, [rpc])
 
   useEffect(() => {
@@ -268,9 +332,44 @@ export function EikonaMainPage({
     }
   }
 
+  const handleBindToShot = async (group: MuweaveElementSummaryV1, cand: CandidateItem) => {
+    const target = bindTargetByCand[cand.artifactId] ?? {
+      shotRef: shotOptions[0]?.shotRef ?? '',
+      role: 'keyframe' as const,
+    }
+    if (!target.shotRef) return
+    const opt = shotOptions.find((s) => s.shotRef === target.shotRef)
+    setBindingCandId(cand.artifactId)
+    try {
+      const res = await rpc.call<{ ok: true }>('shot.media.link', {
+        shotRef: target.shotRef,
+        ...(opt?.sceneRef ? { sceneRef: opt.sceneRef } : {}),
+        ...(opt?.episodeRef ? { episodeRef: opt.episodeRef } : {}),
+        role: target.role,
+        ...(cand.sha256 ? { sha256: cand.sha256 } : { elementId: group.elementId }),
+        artifactId: cand.artifactId,
+      })
+      if (!res.ok) {
+        setNotice({ tone: 'bad', text: `${res.error.code}: ${res.error.message}` })
+        return
+      }
+      setLastBoundShot({ shotRef: target.shotRef, artifactId: cand.artifactId, role: target.role })
+      setNotice({
+        tone: 'ok',
+        text: `${cand.artifactId} → ${target.shotRef} (${target.role}) · ${t('boundToShotDone')}`,
+      })
+    } finally {
+      setBindingCandId(null)
+    }
+  }
+
   const candidateGroups = elements.filter((e) => e.kind === 'eikona.candidate_group')
   const masterBindings = elements.filter((e) => e.kind === 'eikona.master_binding' || e.kind === 'eikona.handoff')
   const scoreCards = elements.filter((e) => e.kind === 'eikona.assessment_card')
+  const groupStatuses = useMemo(
+    () => Array.from(new Set(candidateGroups.map((g) => g.status).filter((s): s is string => Boolean(s)))),
+    [candidateGroups],
+  )
   // Card minimum width drives the column count; zoom widens cards instead of scaling the grid.
   const cardMin = `${(gridCols === 2 ? 18 : 11) * (zoomed ? 1.5 : 1)}rem`
   const firstGroup = candidateGroups[0]
@@ -343,14 +442,78 @@ export function EikonaMainPage({
           label: () => t('tabGallery'),
           render: ({ onPinCompare }) => {
             if (candidateGroups.length === 0) return <EmptyState icon="image">{coreT('emptyElements')}</EmptyState>
+            const q = galleryQuery.trim().toLowerCase()
+            const filteredGroups = candidateGroups
+              .filter((g) => galleryStatus === 'all' || g.status === galleryStatus)
+              .map((group) => {
+                const full = details[group.elementId]
+                const payload = (full?.payload ?? {}) as { runId?: string; candidates?: CandidateItem[] }
+                const runId = payload.runId ?? group.elementId
+                const allCands = payload.candidates ?? []
+                const cands = q
+                  ? allCands.filter((c) =>
+                      `${group.title} ${c.artifactId} ${c.handle} ${c.promptExcerpt} ${c.role}`
+                        .toLowerCase()
+                        .includes(q),
+                    )
+                  : allCands
+                return { group, runId, cands }
+              })
+              .filter((entry) => !q || entry.cands.length > 0)
+
             return (
               <div className="mw-stack" data-gap="lg">
-                {candidateGroups.map((group) => {
-                  const full = details[group.elementId]
-                  const payload = (full?.payload ?? {}) as { runId?: string; candidates?: CandidateItem[] }
-                  const runId = payload.runId ?? group.elementId
-                  const cands = payload.candidates ?? []
-                  return (
+                <div className="dr-filter-bar mw-spread" data-eikona-gallery-filter="true">
+                  <div className="mw-row" data-gap="xs">
+                    <input
+                      type="search"
+                      className="mw-input"
+                      aria-label={t('gallerySearchPlaceholder')}
+                      placeholder={t('gallerySearchPlaceholder')}
+                      data-eikona-search="true"
+                      value={galleryQuery}
+                      onChange={(ev) => setGalleryQuery(ev.target.value)}
+                    />
+                    <select
+                      className="mw-input"
+                      aria-label={t('galleryFilterAll')}
+                      data-eikona-status-filter="true"
+                      value={galleryStatus}
+                      onChange={(ev) => setGalleryStatus(ev.target.value)}
+                    >
+                      <option value="all">{t('galleryFilterAll')}</option>
+                      {groupStatuses.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {lastBoundShot ? (
+                  <div className="mw-dsh-card mw-spread" data-flat="true" data-eikona-bind-receipt="true" role="status">
+                    <span className="mw-dsh-muted">
+                      {lastBoundShot.artifactId} → <code className="mw-dsh-code">{lastBoundShot.shotRef}</code> (
+                      {lastBoundShot.role}) · {t('boundToShotDone')}
+                    </span>
+                    <button
+                      type="button"
+                      className="mw-dsh-btn"
+                      data-size="sm"
+                      data-variant="primary"
+                      data-eikona-goto-drama="true"
+                      onClick={() => navigateToTheaterRoom('muweave-drama')}
+                    >
+                      {t('openInDrama')}
+                    </button>
+                  </div>
+                ) : null}
+
+                {filteredGroups.length === 0 ? (
+                  <EmptyState icon="image">{t('galleryNoMatch')}</EmptyState>
+                ) : (
+                  filteredGroups.map(({ group, runId, cands }) => (
                     <section key={group.elementId} className="mw-stack">
                       <SectionHead
                         title={group.title}
@@ -358,90 +521,148 @@ export function EikonaMainPage({
                         actions={<StatusTag status={group.status} lang={lang} />}
                       />
                       <Masonry min={cardMin} data-eikona-compare-grid={String(gridCols)}>
-                        {cands.map((cand) => (
-                          <MediaCard
-                            key={cand.artifactId}
-                            ratio={cand.width && cand.height ? `${cand.width} / ${cand.height}` : '3 / 4'}
-                            media={<CandidateMediaPreview rpc={rpc} sha256={cand.sha256} alt={cand.artifactId} t={t} />}
-                            title={cand.artifactId}
-                            meta={[cand.modelRef.split('/').pop(), cand.width && cand.height ? `${cand.width}×${cand.height}` : '', cand.role]
-                              .filter(Boolean)
-                              .join(' · ')}
-                            actions={
-                              <>
-                                {cand.handle ? (
-                                  <>
-                                    <IconButton
-                                      icon="star"
-                                      size="sm"
-                                      label={t('bindMaster')}
-                                      onClick={() => void runControlledHandoff(cand.handle, 'bind')}
-                                    />
-                                    <IconButton
-                                      icon="handoff"
-                                      size="sm"
-                                      label={t('handoffAsset')}
-                                      onClick={() => void runControlledHandoff(cand.handle, 'handoff')}
-                                    />
-                                  </>
-                                ) : null}
-                                <IconButton
-                                  icon="pin"
-                                  size="sm"
-                                  label={coreT('openCompareB')}
-                                  onClick={() =>
-                                    onPinCompare(
-                                      <div className="mw-stack" data-gap="sm">
-                                        <CandidateMediaPreview rpc={rpc} sha256={cand.sha256} alt={cand.artifactId} t={t} />
-                                        <strong className="mw-dsh-code">{cand.artifactId}</strong>
-                                        <p className="mw-dsh-muted">{cand.promptExcerpt}</p>
-                                        <span className="mw-dsh-code">{cand.uri}</span>
-                                      </div>,
-                                    )
-                                  }
-                                />
-                                <IconButton
-                                  icon="at"
-                                  size="sm"
-                                  label={coreT('insertRefChip')}
-                                  onClick={() =>
-                                    stageItemToFloatingAgent({
-                                      kind: 'element',
-                                      ref: `${group.elementId}:${cand.artifactId}`,
-                                      label: `${group.title}/${cand.artifactId}`,
-                                      serializedLine: `[EikonaArtifact run=${runId} artifact=${cand.artifactId} uri=${cand.uri}]`,
-                                    })
-                                  }
-                                />
-                              </>
-                            }
-                          >
-                            {cand.promptExcerpt ? (
-                              <span className="mw-dsh-muted mw-clamp-2" title={cand.promptExcerpt}>
-                                {cand.promptExcerpt}
-                              </span>
-                            ) : null}
-                            {typeof cand.overallScore === 'number' ? (
-                              <ScoreMeter label={t('overallScore')} value={cand.overallScore} />
-                            ) : null}
-                            <div className="ek-cand-actions">
-                              <PillButton
-                                variant="primary"
-                                icon="check"
-                                onClick={() => void runControlledDecision(runId, cand.artifactId, 'accept')}
-                              >
-                                {t('acceptCandidate')}
-                              </PillButton>
-                              <PillButton onClick={() => void runControlledDecision(runId, cand.artifactId, 'reject')}>
-                                {t('rejectCandidate')}
-                              </PillButton>
-                            </div>
-                          </MediaCard>
-                        ))}
+                        {cands.map((cand) => {
+                          const bindChoice = bindTargetByCand[cand.artifactId] ?? {
+                            shotRef: shotOptions[0]?.shotRef ?? '',
+                            role: 'keyframe' as const,
+                          }
+                          return (
+                            <MediaCard
+                              key={cand.artifactId}
+                              ratio={cand.width && cand.height ? `${cand.width} / ${cand.height}` : '3 / 4'}
+                              media={<CandidateMediaPreview rpc={rpc} sha256={cand.sha256} alt={cand.artifactId} t={t} />}
+                              title={cand.artifactId}
+                              meta={[cand.modelRef.split('/').pop(), cand.width && cand.height ? `${cand.width}×${cand.height}` : '', cand.role]
+                                .filter(Boolean)
+                                .join(' · ')}
+                              actions={
+                                <>
+                                  {cand.handle ? (
+                                    <>
+                                      <IconButton
+                                        icon="star"
+                                        size="sm"
+                                        label={t('bindMaster')}
+                                        onClick={() => void runControlledHandoff(cand.handle, 'bind')}
+                                      />
+                                      <IconButton
+                                        icon="handoff"
+                                        size="sm"
+                                        label={t('handoffAsset')}
+                                        onClick={() => void runControlledHandoff(cand.handle, 'handoff')}
+                                      />
+                                    </>
+                                  ) : null}
+                                  <IconButton
+                                    icon="pin"
+                                    size="sm"
+                                    label={coreT('openCompareB')}
+                                    onClick={() =>
+                                      onPinCompare(
+                                        <div className="mw-stack" data-gap="sm">
+                                          <CandidateMediaPreview rpc={rpc} sha256={cand.sha256} alt={cand.artifactId} t={t} />
+                                          <strong className="mw-dsh-code">{cand.artifactId}</strong>
+                                          <p className="mw-dsh-muted">{cand.promptExcerpt}</p>
+                                          <span className="mw-dsh-code">{cand.uri}</span>
+                                        </div>,
+                                      )
+                                    }
+                                  />
+                                  <IconButton
+                                    icon="at"
+                                    size="sm"
+                                    label={coreT('insertRefChip')}
+                                    onClick={() =>
+                                      stageItemToFloatingAgent({
+                                        kind: 'element',
+                                        ref: `${group.elementId}:${cand.artifactId}`,
+                                        label: `${group.title}/${cand.artifactId}`,
+                                        serializedLine: `[EikonaArtifact run=${runId} artifact=${cand.artifactId} uri=${cand.uri}]`,
+                                      })
+                                    }
+                                  />
+                                </>
+                              }
+                            >
+                              {cand.promptExcerpt ? (
+                                <span className="mw-dsh-muted mw-clamp-2" title={cand.promptExcerpt}>
+                                  {cand.promptExcerpt}
+                                </span>
+                              ) : null}
+                              {typeof cand.overallScore === 'number' ? (
+                                <ScoreMeter label={t('overallScore')} value={cand.overallScore} />
+                              ) : null}
+                              <div className="ek-cand-actions">
+                                <PillButton
+                                  variant="primary"
+                                  icon="check"
+                                  onClick={() => void runControlledDecision(runId, cand.artifactId, 'accept')}
+                                >
+                                  {t('acceptCandidate')}
+                                </PillButton>
+                                <PillButton onClick={() => void runControlledDecision(runId, cand.artifactId, 'reject')}>
+                                  {t('rejectCandidate')}
+                                </PillButton>
+                              </div>
+                              {shotOptions.length > 0 ? (
+                                <div className="ek-bind-shot" data-eikona-bind-shot={cand.artifactId}>
+                                  <select
+                                    className="mw-input"
+                                    aria-label={`${t('bindShotSelect')} (${cand.artifactId})`}
+                                    data-bind-shot-select={cand.artifactId}
+                                    value={bindChoice.shotRef}
+                                    onChange={(ev) =>
+                                      setBindTargetByCand((prev) => ({
+                                        ...prev,
+                                        [cand.artifactId]: { ...bindChoice, shotRef: ev.target.value },
+                                      }))
+                                    }
+                                  >
+                                    {shotOptions.map((opt) => (
+                                      <option key={opt.shotRef} value={opt.shotRef}>
+                                        {opt.shotRef}
+                                        {opt.sceneRef ? ` · ${opt.sceneRef}` : ''}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    className="mw-input"
+                                    aria-label={`${t('bindRoleSelect')} (${cand.artifactId})`}
+                                    data-bind-role-select={cand.artifactId}
+                                    value={bindChoice.role}
+                                    onChange={(ev) =>
+                                      setBindTargetByCand((prev) => ({
+                                        ...prev,
+                                        [cand.artifactId]: {
+                                          ...bindChoice,
+                                          role: ev.target.value === 'reference' ? 'reference' : 'keyframe',
+                                        },
+                                      }))
+                                    }
+                                  >
+                                    <option value="keyframe">{t('roleKeyframe')}</option>
+                                    <option value="reference">{t('roleReference')}</option>
+                                  </select>
+                                  <button
+                                    type="button"
+                                    className="mw-dsh-btn"
+                                    data-size="sm"
+                                    data-variant="quiet"
+                                    data-bind-shot-submit={cand.artifactId}
+                                    disabled={bindingCandId === cand.artifactId || !bindChoice.shotRef}
+                                    onClick={() => void handleBindToShot(group, cand)}
+                                  >
+                                    {t('bindToShot')}
+                                  </button>
+                                </div>
+                              ) : null}
+                            </MediaCard>
+                          )
+                        })}
                       </Masonry>
                     </section>
-                  )
-                })}
+                  ))
+                )}
               </div>
             )
           },

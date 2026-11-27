@@ -74,3 +74,29 @@ export function useToolCatalog(rpc: MuweaveRpcClient, enabled = true) {
   return { catalog, entries, groups: groupToolCatalog(entries), error, reload: load }
 }
 export function toolOwnerLabel(owner: ToolOwner): string { return owner === 'muweave' ? 'MuWeave' : owner }
+
+const UNAVAILABLE_REASON_LABELS: Record<'zh' | 'en', Record<string, string>> = {
+  zh: {
+    NO_COST_CAP: '未接费用封顶',
+    NO_SUBMIT_COMMAND: '未接提交命令',
+    ADAPTER_PENDING: '适配器待接入',
+    OWNER_NOT_INSTALLED: '未安装引擎',
+    MARKER_MISSING: '缺少工作区标记',
+    PAID_DISABLED_BY_HOST: '宿主已关闭付费',
+  },
+  en: {
+    NO_COST_CAP: 'No cost cap',
+    NO_SUBMIT_COMMAND: 'No submit command',
+    ADAPTER_PENDING: 'Adapter pending',
+    OWNER_NOT_INSTALLED: 'Engine not installed',
+    MARKER_MISSING: 'Workspace marker missing',
+    PAID_DISABLED_BY_HOST: 'Paid disabled by host',
+  },
+}
+
+/** Map a raw capability unavailableReason enum to a localized reader label (unknown codes pass through). */
+export function unavailableReasonLabel(code: string, lang: string): string {
+  if (!code) return ''
+  const table = lang === 'en' ? UNAVAILABLE_REASON_LABELS.en : UNAVAILABLE_REASON_LABELS.zh
+  return table[code] ?? code
+}

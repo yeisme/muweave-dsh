@@ -89,6 +89,21 @@ export const MUWEAVE_RUNTIME_SKILLS: readonly KitRuntimeSkillDef[] = [
       '- Prefer `scene:`/`shot:`/element ids already present in `.muweave/`; do not invent refs.',
     ].join('\n'),
   },
+  {
+    name: 'muweave-cli-mcp-assist',
+    description: 'Guide creators on using the muweave Creator CLI, demo seed, and local/remote MCP server safely.',
+    whenToUse: 'Use when the user asks how to run muweave CLI commands, seed a demo workspace, or connect external AI clients via local stdio or remote HTTP MCP.',
+    source: 'runtime',
+    content: [
+      '# MuWeave Creator CLI & MCP Assist',
+      '',
+      '- Creator CLI (`muweave`): supports human-friendly output, `--json`, and `--agent` (`spec_version=1.0`).',
+      '- Common commands: `muweave status`, `muweave shots list --missing keyframe`, `muweave review set <shotRef> --status approved`, `muweave export cmx3600_edl --out roughcut.edl`, `muweave demo seed`.',
+      '- Local stdio MCP: `muweave mcp --workspace ${workspaceFolder}` exposes narrow read/review/export/schedule/estimate tools, `muweave://*` resources, and prompts.',
+      '- Remote Streamable HTTP MCP: `muweave mcp --transport http --host 0.0.0.0 --port 3741 --auth-token <token>` (non-loopback bindings require Bearer auth).',
+      '- Paid generation approval (`job.approve`) is never exposed via CLI or MCP; users always approve paid jobs in the MuWeave 生成台 UI.',
+    ].join('\n'),
+  },
 ]
 
 export interface MuweaveKitConfig extends CreatorHostServiceOptions {
@@ -351,6 +366,138 @@ export function apply(ctx: DshHostContextLike, config: MuweaveKitConfig = {}): v
     }, async (args: { ref: string }) => {
       const res = await service.handleRpcAction('schedule.clear', { ref: args.ref })
       return boardOut(res as never)
+    })
+
+    const ALL_MEDIA_ROLES = ['keyframe', 'reference', 'video', 'voice', 'music', 'sfx'] as const
+
+    reg('muweave_drama_shots_list', {
+      description: 'List storyboard shots with director review status and 6-track media readiness. Optional filters: sceneRef, status, missing role.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sceneRef: { type: 'string', description: 'Filter by sceneRef, e.g. scene:ep01:s01' },
+          status: { type: 'string', description: 'Filter by review status (draft|in_review|needs_revision|approved|locked)' },
+          missing: { type: 'string', description: 'Filter shots missing a media role (keyframe|reference|video|voice|music|sfx)' },
+        },
+        additionalProperties: false,
+      },
+      output: { schema: { type: 'object' }, render: jsonOut },
+    }, async (args: { sceneRef?: string; status?: string; missing?: string }) => {
+      const [tablesRes, reviewsRes] = await Promise.all([
+        service.handleRpcAction('bundle.elements.list', { kind: 'drama.storyboard_table' }),
+        service.handleRpcAction('drama.shot.review.list', {}),
+      ])
+      if (!tablesRes.ok) return fail(tablesRes as never)
+      const reviewsMap = new Map<string, { status: string; note?: string }>()
+      if (reviewsRes.ok) {
+        const recs = (reviewsRes.data as { reviews?: Array<{ shotRef: string; status: string; note?: string }> }).reviews ?? []
+        for (const rec of recs) reviewsMap.set(rec.shotRef, rec)
+      }
+      const tables = (tablesRes.data as { elements?: Array<{ elementId: string }> }).elements ?? []
+      const shots: Array<Record<string, unknown>> = []
+      for (const tbl of tables) {
+        const detail = await service.handleRpcAction('bundle.element.get', { elementId: tbl.elementId })
+        if (!detail.ok) continue
+        const rows = ((detail.data as { element?: { payload?: { rows?: Array<Record<string, any>> } } }).element?.payload?.rows ?? [])
+        for (const row of rows) {
+          const shotRef = String(row.shotRef ?? '')
+          const sceneRef = String(row.sceneRef ?? '')
+          const review = reviewsMap.get(shotRef)
+          const reviewStatus = review?.status ?? 'draft'
+          const linked = Array.isArray(row.linkedMedia) ? (row.linkedMedia as Array<{ role?: string }>) : []
+          const linkedRoles = [...new Set(linked.map((m) => String(m.role ?? '')).filter(Boolean))]
+          const missingRoles = ALL_MEDIA_ROLES.filter((role) => !linkedRoles.includes(role))
+          if (args.sceneRef && sceneRef !== args.sceneRef) continue
+          if (args.status && reviewStatus !== args.status) continue
+          if (args.missing && !missingRoles.includes(args.missing as (typeof ALL_MEDIA_ROLES)[number])) continue
+          shots.push({
+            shotRef,
+            sceneRef,
+            order: Number(row.order ?? 0),
+            plannedDurationMs: Math.round(Number(row.plannedDurationMicros ?? 0) / 1000),
+            reviewStatus,
+            ...(review?.note ? { reviewNote: review.note } : {}),
+            linkedRoles,
+            missingRoles,
+          })
+        }
+      }
+      return { ok: true, total: shots.length, shots }
+    })
+
+    reg('muweave_drama_review_set', {
+      description: 'Update director review status, note, or tags for one storyboard shot. Local, reversible, spends nothing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          shotRef: { type: 'string', description: 'Shot ref, e.g. shot:ep01:s01:01' },
+          status: { type: 'string', description: 'draft | in_review | needs_revision | approved | locked' },
+          note: { type: 'string', description: 'Optional director review note' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Optional quick review tags' },
+          expectedRevision: { type: 'number', description: 'Optional optimistic lock revision' },
+        },
+        required: ['shotRef', 'status'],
+        additionalProperties: false,
+      },
+      output: { schema: { type: 'object' }, render: jsonOut },
+    }, async (args: { shotRef: string; status: string; note?: string; tags?: string[]; expectedRevision?: number }) => {
+      const res = await service.handleRpcAction('drama.shot.review.set', { ...args })
+      if (!res.ok) return fail(res as never)
+      const record = (res.data as { record?: Record<string, unknown> }).record
+      return { ok: true, record }
+    })
+
+    reg('muweave_drama_export', {
+      description: 'Export a sanitized rough-cut package (cut_manifest_v1, cmx3600_edl, or shotlist_csv) with zero host paths or credentials.',
+      parameters: {
+        type: 'object',
+        properties: {
+          format: { type: 'string', description: 'cut_manifest_v1 | cmx3600_edl | shotlist_csv' },
+          fps: { type: 'number', description: '24 | 25 | 30' },
+          aspectRatio: { type: 'string', description: 'e.g. 9:16 or 16:9' },
+          episodeRef: { type: 'string', description: 'Optional episode ref' },
+        },
+        required: ['format'],
+        additionalProperties: false,
+      },
+      output: { schema: { type: 'object' }, render: jsonOut },
+    }, async (args: { format: string; fps?: number; aspectRatio?: string; episodeRef?: string }) => {
+      const res = await service.handleRpcAction('drama.export.manifest', { ...args })
+      if (!res.ok) return fail(res as never)
+      const exp = res.data as Record<string, unknown>
+      return {
+        ok: true,
+        filename: exp.filename,
+        mimeType: exp.mimeType,
+        shotCount: exp.shotCount,
+        totalDurationMs: exp.totalDurationMs,
+        fps: exp.fps,
+        aspectRatio: exp.aspectRatio,
+        content: exp.content,
+      }
+    })
+
+    reg('muweave_project_diagnose', {
+      description: 'Run read-only project diagnosis and registry v1->v2 migration readiness report.',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'Optional projectId to scope diagnosis' },
+        },
+        additionalProperties: false,
+      },
+      output: { schema: { type: 'object' }, render: jsonOut },
+    }, async (args: { projectId?: string }) => {
+      const [diagRes, migRes] = await Promise.all([
+        service.handleRpcAction('project.diagnose', args.projectId ? { projectId: args.projectId } : {}),
+        service.handleRpcAction('project.migration.report', {}),
+      ])
+      if (!diagRes.ok) return fail(diagRes as never)
+      return {
+        ok: true,
+        reports: (diagRes.data as { reports?: unknown[] }).reports ?? [],
+        ...(migRes.ok ? { migrationReport: migRes.data } : {}),
+      }
     })
   })
 }

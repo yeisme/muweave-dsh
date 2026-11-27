@@ -32,8 +32,94 @@ export const STATE_META: Record<DiagnosisState, { label: string; tone: Tone }> =
 
 const SEVERITY_TONE: Record<DiagnosisSeverity, Tone> = { info: 'info', warn: 'warn', error: 'bad' }
 
-// project.diagnose is not in the shared allowlist type until the host side lands; the call shape is the same.
+export interface MigrationCheck {
+  id: string
+  label: string
+  status: 'pass' | 'warn' | 'fail'
+  detail: string
+}
+
+export interface MigrationReport {
+  registrySchema: string
+  projectCount: number
+  archivedCount: number
+  corruptBackupCount: number
+  corruptBackups: string[]
+  legacyScheduleCount: number
+  unclaimedBundleCount: number
+  readyForV2: boolean
+  checks: MigrationCheck[]
+  generatedAt?: string
+}
+
+const MIGRATION_CHECK_TONE: Record<MigrationCheck['status'], Tone> = {
+  pass: 'ok',
+  warn: 'warn',
+  fail: 'bad',
+}
+
+// project.diagnose / project.migration.report cast keeps compatibility with older host type builds.
 const DIAGNOSE = 'project.diagnose' as string as Parameters<MuweaveRpcClient['call']>[0]
+const MIGRATION_REPORT = 'project.migration.report' as string as Parameters<MuweaveRpcClient['call']>[0]
+
+/** Strips any directory prefix so corrupt backup filenames never expose host paths. */
+export function sanitizeBackupName(raw: string): string {
+  const parts = raw.trim().split(/[/\\]/)
+  return parts[parts.length - 1] ?? ''
+}
+
+/** Reads a project.migration.report payload defensively; returns null for older/mock hosts without migration data. */
+export function readMigrationReport(raw: unknown): MigrationReport | null {
+  if (!raw || typeof raw !== 'object') return null
+  const container = raw as Record<string, unknown>
+  const src = (
+    container.report && typeof container.report === 'object' ? container.report : container
+  ) as Record<string, unknown>
+  const registrySchema =
+    typeof src.registrySchema === 'string' && src.registrySchema.trim()
+      ? src.registrySchema.trim()
+      : typeof src.schema === 'string' && src.schema.trim() && src.schema !== 'muweave.migration-report.v1'
+        ? src.schema.trim()
+        : ''
+  if (!registrySchema || typeof src.projectCount !== 'number') return null
+  const corruptBackups = Array.isArray(src.corruptBackups)
+    ? src.corruptBackups
+        .map((item) => (typeof item === 'string' ? sanitizeBackupName(item) : ''))
+        .filter(Boolean)
+    : []
+  const checks: MigrationCheck[] = Array.isArray(src.checks)
+    ? src.checks.flatMap((item, index): MigrationCheck[] => {
+        if (!item || typeof item !== 'object') return []
+        const c = item as Record<string, unknown>
+        const label = typeof c.label === 'string' && c.label.trim() ? c.label.trim() : ''
+        const detail = typeof c.detail === 'string' ? c.detail.trim() : ''
+        if (!label && !detail) return []
+        const status: MigrationCheck['status'] =
+          c.status === 'pass' || c.status === 'warn' || c.status === 'fail' ? c.status : 'warn'
+        const id = typeof c.id === 'string' && c.id.trim() ? c.id.trim() : `check-${index}`
+        return [{ id, label: label || id, status, detail }]
+      })
+    : []
+  const corruptBackupCount =
+    typeof src.corruptBackupCount === 'number' ? src.corruptBackupCount : corruptBackups.length
+  const archivedCount = typeof src.archivedCount === 'number' ? src.archivedCount : 0
+  const legacyScheduleCount = typeof src.legacyScheduleCount === 'number' ? src.legacyScheduleCount : 0
+  const unclaimedBundleCount = typeof src.unclaimedBundleCount === 'number' ? src.unclaimedBundleCount : 0
+  const readyForV2 =
+    typeof src.readyForV2 === 'boolean' ? src.readyForV2 : checks.every((check) => check.status !== 'fail')
+  return {
+    registrySchema,
+    projectCount: src.projectCount,
+    archivedCount,
+    corruptBackupCount,
+    corruptBackups,
+    legacyScheduleCount,
+    unclaimedBundleCount,
+    readyForV2,
+    checks,
+    ...(typeof src.generatedAt === 'string' ? { generatedAt: src.generatedAt } : {}),
+  }
+}
 
 /** Drops malformed reports and findings instead of letting one bad row blank the panel; a missing state is unknown, never healthy. */
 export function readReports(raw: unknown): DiagnosisReport[] {
@@ -88,12 +174,14 @@ export function DiagnosisPanel({
   const [open, setOpen] = useState(false)
   /** null while a query is in flight or before the first expand. */
   const [result, setResult] = useState<Result | null>(null)
+  const [migration, setMigration] = useState<MigrationReport | null>(null)
   const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
     if (!open) return
     let live = true
     setResult(null)
+    setMigration(null)
     void rpc
       .call<{ reports?: unknown }>(DIAGNOSE, projectId ? { projectId } : {})
       .then((res) => {
@@ -102,6 +190,15 @@ export function DiagnosisPanel({
         else setResult({ ok: false, message: res?.error?.message ?? '诊断没有完成' })
       })
       .catch((err: unknown) => { if (live) setResult({ ok: false, message: err instanceof Error ? err.message : String(err) }) })
+    void rpc
+      .call<unknown>(MIGRATION_REPORT, {})
+      .then((res) => {
+        if (!live) return
+        if (res?.ok) setMigration(readMigrationReport(res.data))
+      })
+      .catch(() => {
+        if (live) setMigration(null)
+      })
     return () => { live = false }
   }, [open, nonce, projectId, rpc])
 
@@ -187,6 +284,68 @@ export function DiagnosisPanel({
               })}
             </ul>
           )}
+          {migration !== null ? (
+            <section className="mw-migration-report" data-migration-report="true" aria-label="注册表迁移报告">
+              <div className="mw-diag-line">
+                <span className="mw-eyebrow">注册表迁移报告</span>
+                <span
+                  className="mw-status"
+                  data-tone={migration.readyForV2 ? 'ok' : 'warn'}
+                  data-migration-ready={migration.readyForV2 ? 'true' : 'false'}
+                >
+                  <span className="mw-dot" />
+                  {migration.readyForV2 ? 'v1 → v2 就绪' : 'v1 → v2 待处理'}
+                </span>
+              </div>
+              <div className="mw-migration-metrics">
+                <span className="mw-chip" data-mono="true" data-migration-schema="true">
+                  Schema: {migration.registrySchema}
+                </span>
+                <span className="mw-chip" data-migration-projects="true">
+                  项目: {migration.projectCount}
+                  {migration.archivedCount > 0 ? `（归档 ${migration.archivedCount}）` : ''}
+                </span>
+                <span className="mw-chip" data-migration-corrupt="true">
+                  损坏备份: {migration.corruptBackupCount}
+                </span>
+                <span className="mw-chip" data-migration-unclaimed="true">
+                  未认领 Bundle: {migration.unclaimedBundleCount}
+                </span>
+                <span className="mw-chip" data-migration-legacy-schedule="true">
+                  旧排期: {migration.legacyScheduleCount}
+                </span>
+              </div>
+              {migration.corruptBackups.length > 0 ? (
+                <div className="mw-migration-backups" data-migration-backups="true">
+                  <span className="mw-dsh-muted">备份文件：</span>
+                  {migration.corruptBackups.map((file) => (
+                    <span key={file} className="mw-chip" data-mono="true">
+                      {file}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {migration.checks.length > 0 ? (
+                <ul className="mw-migration-checks" data-migration-checks="true">
+                  {migration.checks.map((check) => (
+                    <li
+                      key={check.id}
+                      className="mw-migration-check"
+                      data-tone={MIGRATION_CHECK_TONE[check.status]}
+                      data-migration-check={check.id}
+                      data-migration-check-status={check.status}
+                    >
+                      <span className="mw-dot" data-tone={MIGRATION_CHECK_TONE[check.status]} />
+                      <span className="mw-diag-detail">
+                        <strong>{check.label}</strong>
+                        {check.detail ? ` · ${check.detail}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
           {result !== null && result.ok ? (
             <div className="mw-diag-foot">
               <button type="button" className="mw-dsh-btn" data-variant="ghost" data-size="sm" onClick={() => setNonce((n) => n + 1)}>

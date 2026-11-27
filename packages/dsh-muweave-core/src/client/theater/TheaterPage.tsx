@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import type { MuweaveTranslator } from '../i18n'
 import { EmptyState, Icon } from '../ui'
+import { ShortcutsHelpModal } from '../shortcuts-modal'
 import {
   getActiveTheaterRoomId,
   getTheaterRooms,
   setActiveTheaterRoom,
   subscribeTheater,
   theaterChromeContext,
+  useTheaterRoomBadges,
   type TheaterRoom,
 } from './registry'
 
@@ -180,10 +182,12 @@ export function RoomNav({
   activeId: string | null
   onSelect: (roomId: string) => void
 }) {
+  const badges = useTheaterRoomBadges()
   return (
     <nav className="mw-room-nav" aria-label={t('theaterRoomsNav')} data-muweave-room-nav="true">
       {rooms.map((room, i) => {
         const current = room.id === activeId
+        const badge = badges[room.id]
         return (
           <button
             key={room.id}
@@ -194,7 +198,12 @@ export function RoomNav({
             title={i < 9 ? `${room.description()} · Alt+${i + 1}` : room.description()}
             onClick={() => onSelect(room.id)}
           >
-            {room.title()}
+            <span>{room.title()}</span>
+            {badge && badge.count > 0 ? (
+              <span className="mw-room-badge" data-room-badge={room.id} data-tone={badge.tone ?? 'info'}>
+                {badge.count}
+              </span>
+            ) : null}
           </button>
         )
       })}
@@ -210,9 +219,26 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
   const rooms = useTheaterRooms()
   const activeId = useActiveTheaterRoomId()
   const Chrome = theaterChromeContext()
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.isComposing) return
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const target = e.target
+        if (
+          target instanceof HTMLElement &&
+          (target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.tagName === 'SELECT' ||
+            target.isContentEditable)
+        ) {
+          return
+        }
+        e.preventDefault()
+        setShortcutsOpen((v) => !v)
+        return
+      }
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
       const m = /^Digit([1-9])$/.exec(e.code)
       if (!m) return
@@ -234,6 +260,8 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
     )
   }
 
+  const isEn = t('langCode') === 'en'
+  const shortcutsLabel = isEn ? 'Keyboard shortcuts (?)' : '快捷键总览 (?)'
   const switcher = (
     <>
       <RoomSwitcher t={t} rooms={rooms} activeId={active.id} onSelect={setActiveTheaterRoom} />
@@ -241,16 +269,30 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
     </>
   )
   const trailing = (
-    <button
-      type="button"
-      className="mw-dsh-btn"
-      data-variant="quiet"
-      data-muweave-theater-back="true"
-      onClick={onBackToChat}
-    >
-      <Icon name="back" />
-      <span>{t('theaterBackToChat')}</span>
-    </button>
+    <span className="mw-row" data-gap="xs">
+      <button
+        type="button"
+        className="mw-dsh-btn"
+        data-variant="ghost"
+        data-size="sm"
+        data-muweave-shortcuts-btn="true"
+        aria-label={shortcutsLabel}
+        title={shortcutsLabel}
+        onClick={() => setShortcutsOpen((v) => !v)}
+      >
+        ?
+      </button>
+      <button
+        type="button"
+        className="mw-dsh-btn"
+        data-variant="quiet"
+        data-muweave-theater-back="true"
+        onClick={onBackToChat}
+      >
+        <Icon name="back" />
+        <span>{t('theaterBackToChat')}</span>
+      </button>
+    </span>
   )
   const Main = active.Main
   return (
@@ -258,6 +300,7 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
       <div className="mw-theater" data-muweave-theater={active.id}>
         <Main key={active.id} />
       </div>
+      <ShortcutsHelpModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} t={t} />
     </Chrome.Provider>
   )
 }

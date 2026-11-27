@@ -22,6 +22,17 @@ export interface CommandPaletteItem {
   run: () => void
 }
 
+/** All 7 canonical theater rooms reachable via quick-jump commands in the command palette. */
+export const THEATER_QUICK_ROOMS: ReadonlyArray<{ id: string; zh: string; en: string }> = [
+  { id: 'muweave-workbench', zh: '总览', en: 'Overview' },
+  { id: 'muweave-eikona', zh: '视觉', en: 'Visual' },
+  { id: 'muweave-script', zh: '剧本', en: 'Script' },
+  { id: 'muweave-drama', zh: '分镜生产', en: 'Production' },
+  { id: 'muweave-draft', zh: '成稿', en: 'Draft' },
+  { id: 'muweave-kit', zh: '工具箱', en: 'Toolbox' },
+  { id: 'muweave-schedule', zh: '排期', en: 'Schedule' },
+]
+
 /** Case-insensitive subsequence match so "总览" and "zlan" both reach 总览. */
 function matches(label: string, query: string): boolean {
   const haystack = label.toLowerCase()

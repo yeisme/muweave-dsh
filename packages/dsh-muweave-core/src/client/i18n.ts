@@ -312,3 +312,5 @@ export function statusLabel(status: string | undefined, lang: string): string {
   const table = lang === 'en' ? STATUS_LABELS.en : STATUS_LABELS.zh
   return table[status] ?? status
 }
+
+export { unavailableReasonLabel } from './tool-catalog'
