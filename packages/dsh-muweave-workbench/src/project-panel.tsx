@@ -27,7 +27,7 @@ export function ProjectPanel({
   t: MuweaveTranslator
   activeProjectId?: string
   onActivate: (project: ProjectRow | undefined) => void
-  variant?: 'bar' | 'full'
+  variant?: 'bar' | 'full' | 'breadcrumb'
   /** F2: a new nonce opens the popover on the claim wizard, preferring that workspace's bundle. */
   claimRequest?: { nonce: number; workspaceId?: string }
 }) {
@@ -192,8 +192,7 @@ export function ProjectPanel({
   if (unsupported) {
     return (
       <div className="mw-project-bar mw-row" data-muweave-project-bar="true" data-gap="sm">
-        <span className="mw-eyebrow">项目</span>
-        <span className="mw-dsh-muted">该宿主未启用项目管理</span>
+        {variant === 'breadcrumb' ? <span className="mw-dsh-muted">当前工作区</span> : <><span className="mw-eyebrow">项目</span><span className="mw-dsh-muted">该宿主未启用项目管理</span></>}
       </div>
     )
   }
@@ -201,8 +200,8 @@ export function ProjectPanel({
   if (variant === 'full') return wizard ?? full
 
   return (
-    <div className="mw-project-bar mw-row" data-muweave-project-bar="true" data-gap="sm">
-      <span className="mw-eyebrow">项目</span>
+    <div className="mw-project-bar mw-row" data-muweave-project-bar="true" data-variant={variant} data-gap="sm">
+      {variant === 'bar' ? <span className="mw-eyebrow">项目</span> : null}
       <button
         type="button"
         className="mw-dsh-btn"
@@ -213,12 +212,12 @@ export function ProjectPanel({
         onClick={() => { if (open) setClaiming(null); setOpen(!open) }}
       >
         <span className="mw-truncate">{active ? active.title : '未选择项目'}</span>
-        {active ? <span className="mw-chip">{STATUS_LABELS[active.status]}</span> : null}
-        {active ? <span className="mw-dsh-muted">{elementCounts[active.id] ?? 0}</span> : null}
+        {active && variant === 'bar' ? <span className="mw-chip">{STATUS_LABELS[active.status]}</span> : null}
+        {active && variant === 'bar' ? <span className="mw-dsh-muted">{elementCounts[active.id] ?? 0}</span> : null}
       </button>
-      <button type="button" className="mw-dsh-btn" data-variant="ghost" data-size="sm" onClick={() => { setClaiming(null); setCreating(true); setOpen(true) }}>
+      {variant === 'bar' ? <button type="button" className="mw-dsh-btn" data-variant="ghost" data-size="sm" onClick={() => { setClaiming(null); setCreating(true); setOpen(true) }}>
         新建项目
-      </button>
+      </button> : null}
       {open ? (
         <div className="mw-project-popover" data-popover="true" role="dialog" aria-label="项目管理">
           {wizard ?? full}

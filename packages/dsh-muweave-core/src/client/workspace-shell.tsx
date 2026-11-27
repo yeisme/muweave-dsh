@@ -48,6 +48,9 @@ export interface WorkspaceShellProps {
   stageTabs: readonly CreatorStageTabSpec[]
   rightInspector?: ReactNode
   headerActions?: ReactNode
+  compact?: boolean
+  breadcrumbs?: ReactNode
+  stageActions?: ReactNode
   refreshCounter?: number
   onSyncRequested?: () => Promise<void> | void
   /** One line under the title (project, owner or rule reminder). */
@@ -95,6 +98,9 @@ export function WorkspaceShell({
   stageTabs,
   rightInspector,
   headerActions,
+  compact = false,
+  breadcrumbs,
+  stageActions,
   refreshCounter = 0,
   onSyncRequested,
   subtitle,
@@ -368,23 +374,25 @@ export function WorkspaceShell({
   }, [stageTabs, currentTab?.id, hasLeft, t])
 
   return (
-    <div ref={rootRef} className="mw-dsh-root" tabIndex={-1} data-muweave-workspace-root="true">
-      <AmbientBackdrop />
+    <div ref={rootRef} className="mw-dsh-root" tabIndex={-1} data-muweave-workspace-root="true" data-compact={compact || undefined}>
+      {compact ? null : <AmbientBackdrop />}
       <header className="mw-dsh-topbar">
         {chrome ? (
           <div className="mw-dsh-title-group" data-theater="true">
             <h1 className="mw-sr-only">{title}</h1>
+            {compact ? <span className="mw-dsh-wordmark">幕织</span> : null}
             {chrome.switcher}
             {/* The room hero carries the subtitle here; repeating it would push the toolbar to a second row. */}
             {subtitle && !hero ? <p className="mw-dsh-subtitle">{subtitle}</p> : null}
           </div>
         ) : (
           <div className="mw-dsh-title-group">
-            <h1 className="mw-dsh-title">{title}</h1>
+            <h1 className="mw-dsh-title" aria-label={compact ? title : undefined}>{compact ? '幕织' : title}</h1>
             {subtitle ? <p className="mw-dsh-subtitle">{subtitle}</p> : null}
           </div>
         )}
 
+        {breadcrumbs ? <div className="mw-dsh-breadcrumbs" aria-label="当前项目和制作阶段">{breadcrumbs}</div> : null}
         <div className="mw-dsh-toolbar" role="toolbar" aria-label={title}>
           {headerActions}
           <GenerationLauncher rpc={rpc} t={t} stage={stage ?? ROOM_STAGE[getActiveTheaterRoomId() ?? '']} />
@@ -398,19 +406,21 @@ export function WorkspaceShell({
             onClick={() => void handleSync()}
           >
             <Icon name="sync" />
-            {isNarrow ? null : (
+            {isNarrow || compact ? null : (
               <span>{syncing ? t('syncingBundle') : syncedAt ? `${t('syncedAt')} ${syncedAt}` : t('syncShort')}</span>
             )}
           </button>
           <IconButton
             data-muweave-open-palette="true"
-            icon="command"
+            icon={compact ? 'search' : 'command'}
             size="sm"
             label={t('commandOpenHint').replace('{mod}K', formatKeyHint('mod+k'))}
             pressed={paletteOpen}
             onClick={() => setPaletteOpen(true)}
           />
+          {compact ? <IconButton icon="at" size="sm" label="打开助手" onClick={() => focusFloatingComposer()} /> : null}
           {chrome?.trailing}
+          {compact ? <span className="mw-dsh-workspace-avatar" aria-label="幕织工作区">幕</span> : null}
         </div>
       </header>
 
@@ -450,6 +460,7 @@ export function WorkspaceShell({
               )}
 
               <div className="mw-dsh-stage-actions">
+                {stageActions}
                 {hasLeft ? (
                   <div ref={filterBtnRef} className="mw-dsh-pop">
                     <button

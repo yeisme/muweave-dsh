@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   CompanionList,
-  CoverCollage,
   EmptyState,
   IconButton,
   Masonry,
@@ -22,7 +21,6 @@ import {
   shotDescription,
   statusLabel,
   statusTone,
-  useProjectCovers,
   type LinkedMediaRef,
   type WorkspaceNotice,
   publishKnownElementsForTriggers,
@@ -46,6 +44,7 @@ import {
   groupByStage,
   groupElements,
   pickPrimary,
+  stageLabel,
   type CompareSubject,
   type ElementGroupBy,
   type StageId,
@@ -243,7 +242,6 @@ export function WorkbenchMainPage({
   /** F1: a view-only projection of the elements in hand; switching it never calls the host. */
   const [groupBy, setGroupBy] = useState<'none' | ElementGroupBy>('none')
   const lang = coreT('langCode')
-  const covers = useProjectCovers(rpc, 3)
   /** Desk v8 P1: the pinned compare side as data; the shell slot only holds a bound <ComparePaneSlot />. */
   const [compareTarget, setCompareTarget] = useState<CompareSubject | null>(null)
   /** True while the compare pane is on screen: the inspector steps aside so both columns are equal. */
@@ -475,7 +473,6 @@ export function WorkbenchMainPage({
   const renderOverview = (onPinCompare: (node: ReactNode) => void) =>
     overviewMode === 'stage' ? (
       <div className="mw-stage-overview" data-muweave-overview-mode="stage">
-        <div className="mw-stage-toolbar">{overviewToggle}</div>
         <div className="mw-stage-layout">
           <StageAxis groups={stageGroups} current={currentStage} onSelect={setPickedStage} lang={lang} />
           <StageWorkbench
@@ -494,7 +491,6 @@ export function WorkbenchMainPage({
       </div>
     ) : (
       <div className="mw-stage-overview" data-muweave-overview-mode="all">
-        <div className="mw-stage-toolbar">{overviewToggle}</div>
         <div className="mw-group-bar" data-element-group-bar="true">{groupToggle}</div>
         {groupBy === 'none' || elements.length === 0 ? (
           renderElementCards(elements, onPinCompare, nextStepCard)
@@ -517,15 +513,8 @@ export function WorkbenchMainPage({
 
   const piItems = elements.filter((e) => e.sourceOwner === 'pi')
   const dshItems = elements.filter((e) => e.sourceOwner === 'dsh')
-  const staleCount = elements.filter((e) => e.stale).length
   const pendingItems = elements.filter((e) => e.stale || statusTone(e.status) !== 'ok')
   const nextItem = pendingItems[0]
-  const [ledeBefore, ledeAfter] = t('heroLede')
-    .replace('{total}', String(elements.length))
-    .replace('{stale}', String(staleCount))
-    .replace('{pending}', String(pendingItems.length))
-    .split('{thumb}')
-  const firstCover = covers?.[0]
   const nextStepCard = (
     <NoteCard ink eyebrow={t('nextStep')} title={nextItem?.title} data-muweave-next-step="true">
       {nextItem ? (
@@ -719,32 +708,16 @@ export function WorkbenchMainPage({
         notice={notice}
         onDismissNotice={() => setNotice(null)}
         leftTree={leftTree}
-        projectBar={
+        compact
+        breadcrumbs={
           <>
-            <ProjectPanel rpc={rpc} t={coreT} activeProjectId={activeProject?.id} onActivate={setActiveProject} claimRequest={claimRequest} />
-            {projectNotice}
+            <ProjectPanel rpc={rpc} t={coreT} activeProjectId={activeProject?.id} onActivate={setActiveProject} claimRequest={claimRequest} variant="breadcrumb" />
+            {currentElement?.episodeRef ? <span className="mw-breadcrumb-episode" title={currentElement.episodeRef}>{currentElement.episodeRef}</span> : null}
+            <span className="mw-breadcrumb-stage">{stageLabel(currentStage, lang)}</span>
           </>
         }
-        hero={
-          <RoomHero
-            eyebrow={t('heroEyebrow')}
-            title={t('heroTitle')}
-            lede={
-              <>
-                {ledeBefore}
-                {firstCover ? <img className="mw-inline-thumb" src={firstCover.url} alt="" /> : null}
-                {ledeAfter}
-              </>
-            }
-            stats={[
-              { icon: 'inbox', value: elements.length, label: t('metricTotal') },
-              { icon: 'spark', value: piItems.length, label: t('tabPiArtifacts') },
-              { icon: 'panelLeft', value: dshItems.length, label: t('tabDshArtifacts') },
-              { icon: 'warn', value: staleCount, label: t('metricStale') },
-            ]}
-            cover={<CoverCollage covers={covers} posterTitle={t('heroTitle')} posterMeta="MuWeave" />}
-          />
-        }
+        projectBar={projectNotice}
+        stageActions={overviewToggle}
         stageTabs={[
           {
             id: 'overview',
