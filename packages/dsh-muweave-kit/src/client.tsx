@@ -65,6 +65,33 @@ const zh = {
   copyMcpBtn: '复制 MCP 配置',
   copiedMcpReceipt: '已复制配置',
   copiedCliReceipt: '已复制命令',
+  adapterCardTitle: '外部引擎 Bridge 配置',
+  adapterCardHint: '接入 OpenAI / ComfyUI / 自定义 CLI 引擎；仅保存环境变量名，严禁填写明文密钥。',
+  adapterPresetOpenAiImage: 'OpenAI 出图',
+  adapterPresetOpenAiTts: 'OpenAI 配音',
+  adapterPresetComfyUi: '本地 ComfyUI',
+  adapterEnvReady: '环境变量已就绪',
+  adapterEnvMissing: '未检测到环境变量',
+  adapterEnvNone: '无需密钥',
+  adapterTestBtn: '测试连通',
+  adapterRemoveBtn: '删除',
+  adapterEnableLabel: '启用',
+  adapterSaveBtn: '保存引擎配置',
+  adapterFieldId: '适配器 ID',
+  adapterFieldTitle: '显示名称',
+  adapterFieldProtocol: '协议类型',
+  adapterFieldKind: '媒体类型',
+  adapterFieldEndpoint: '接口 URL',
+  adapterFieldBinary: 'CLI 可执行文件名',
+  adapterFieldModel: '模型名称',
+  adapterFieldPrice: '预估单价 (USD，可选)',
+  adapterFieldAuthEnv: '环境变量名 (如 OPENAI_API_KEY)',
+  adapterFieldPrivateNet: '允许局域网私有地址（如 LAN ComfyUI）',
+  adapterSecretWarning: '禁止填写明文 API Key（如 sk-* 或 Bearer）；此处只能填环境变量名（如 OPENAI_API_KEY）。',
+  adapterEmpty: '尚未注册外部引擎，可点击上方预设一键预填。',
+  adapterSavedReceipt: '已保存引擎配置',
+  adapterTestOk: '连通正常',
+  adapterTestFail: '连通异常',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -105,6 +132,33 @@ const en: Record<keyof typeof zh, string> = {
   copyMcpBtn: 'Copy MCP Config',
   copiedMcpReceipt: 'Config copied',
   copiedCliReceipt: 'Command copied',
+  adapterCardTitle: 'External Engine Bridge',
+  adapterCardHint: 'Connect OpenAI / ComfyUI / CLI engines; store env var names only — never paste plaintext keys.',
+  adapterPresetOpenAiImage: 'OpenAI Image',
+  adapterPresetOpenAiTts: 'OpenAI Voice',
+  adapterPresetComfyUi: 'Local ComfyUI',
+  adapterEnvReady: 'Env Ready',
+  adapterEnvMissing: 'Env Not Set',
+  adapterEnvNone: 'No Key Needed',
+  adapterTestBtn: 'Test Connection',
+  adapterRemoveBtn: 'Remove',
+  adapterEnableLabel: 'Enabled',
+  adapterSaveBtn: 'Save Engine',
+  adapterFieldId: 'Adapter ID',
+  adapterFieldTitle: 'Title',
+  adapterFieldProtocol: 'Protocol',
+  adapterFieldKind: 'Media Kind',
+  adapterFieldEndpoint: 'Endpoint URL',
+  adapterFieldBinary: 'CLI Binary Name',
+  adapterFieldModel: 'Model',
+  adapterFieldPrice: 'Unit Price USD (optional)',
+  adapterFieldAuthEnv: 'Auth Env Var Name (e.g. OPENAI_API_KEY)',
+  adapterFieldPrivateNet: 'Allow private LAN addresses (e.g. LAN ComfyUI)',
+  adapterSecretWarning: 'Plaintext keys (sk-* or Bearer) are forbidden; enter an env var name like OPENAI_API_KEY.',
+  adapterEmpty: 'No custom engines registered yet. Use a preset above to prefill.',
+  adapterSavedReceipt: 'Engine saved',
+  adapterTestOk: 'Reachable',
+  adapterTestFail: 'Check failed',
 }
 
 export function KitIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -190,6 +244,127 @@ const KIT_MCP_MODES: ReadonlyArray<{ id: McpConfigMode; labelKey: string; snippe
   },
 ]
 
+type CustomAdapterProtocol = 'openai_http' | 'comfyui_http' | 'cli_wrapper'
+type CustomAdapterKind = 'image' | 'voice' | 'video' | 'sfx'
+type CustomAdapterStage = 'visual' | 'storyboard' | 'sound'
+
+interface CustomAdapterRow {
+  adapterId: string
+  title: string
+  protocol: CustomAdapterProtocol
+  kind: CustomAdapterKind
+  stage: CustomAdapterStage
+  enabled: boolean
+  endpointUrl?: string
+  binary?: string
+  model?: string
+  unitPriceUsd?: number
+  authEnvVar?: string
+  allowPrivateNetwork?: boolean
+  envReady?: boolean
+}
+
+function stageForAdapterKind(kind: CustomAdapterKind): CustomAdapterStage {
+  if (kind === 'voice' || kind === 'sfx') return 'sound'
+  if (kind === 'video') return 'storyboard'
+  return 'visual'
+}
+
+interface CustomAdapterFormState {
+  adapterId: string
+  title: string
+  protocol: CustomAdapterProtocol
+  kind: CustomAdapterKind
+  endpointUrl: string
+  binary: string
+  model: string
+  unitPriceUsd: string
+  authEnvVar: string
+  allowPrivateNetwork: boolean
+  enabled: boolean
+}
+
+const EMPTY_ADAPTER_FORM: CustomAdapterFormState = {
+  adapterId: '',
+  title: '',
+  protocol: 'openai_http',
+  kind: 'image',
+  endpointUrl: '',
+  binary: '',
+  model: '',
+  unitPriceUsd: '',
+  authEnvVar: '',
+  allowPrivateNetwork: false,
+  enabled: true,
+}
+
+const ADAPTER_UI_PRESETS: ReadonlyArray<{
+  key: string
+  labelKey: string
+  form: CustomAdapterFormState
+}> = [
+  {
+    key: 'openai-image',
+    labelKey: 'adapterPresetOpenAiImage',
+    form: {
+      adapterId: 'openai-image',
+      title: 'OpenAI 出图',
+      protocol: 'openai_http',
+      kind: 'image',
+      endpointUrl: 'https://api.openai.com/v1/images/generations',
+      binary: '',
+      model: 'gpt-image-1',
+      unitPriceUsd: '0.08',
+      authEnvVar: 'OPENAI_API_KEY',
+      allowPrivateNetwork: false,
+      enabled: true,
+    },
+  },
+  {
+    key: 'openai-tts',
+    labelKey: 'adapterPresetOpenAiTts',
+    form: {
+      adapterId: 'openai-tts',
+      title: 'OpenAI 配音',
+      protocol: 'openai_http',
+      kind: 'voice',
+      endpointUrl: 'https://api.openai.com/v1/audio/speech',
+      binary: '',
+      model: 'gpt-4o-mini-tts',
+      unitPriceUsd: '0.02',
+      authEnvVar: 'OPENAI_API_KEY',
+      allowPrivateNetwork: false,
+      enabled: true,
+    },
+  },
+  {
+    key: 'comfyui-local',
+    labelKey: 'adapterPresetComfyUi',
+    form: {
+      adapterId: 'comfyui-local',
+      title: '本地 ComfyUI',
+      protocol: 'comfyui_http',
+      kind: 'image',
+      endpointUrl: 'http://127.0.0.1:8188',
+      binary: '',
+      model: 'default-workflow',
+      unitPriceUsd: '0',
+      authEnvVar: '',
+      allowPrivateNetwork: true,
+      enabled: true,
+    },
+  },
+]
+
+const ENV_VAR_NAME_RE = /^[A-Z_][A-Z0-9_]{1,63}$/
+
+function isUnsafeAuthEnvVar(raw: string): boolean {
+  const trimmed = raw.trim()
+  if (!trimmed) return false
+  if (/^sk-[A-Za-z0-9_-]{8,}/i.test(trimmed) || /\bBearer\s+/i.test(trimmed)) return true
+  return !ENV_VAR_NAME_RE.test(trimmed)
+}
+
 function capabilityIdForTemplate(tpl: TemplateCatalogEntryV1): string {
   const refLower = tpl.templateRef.toLowerCase()
   if (refLower.includes('audio') || refLower.includes('sfx')) return 'sonora.sfx.generate'
@@ -215,8 +390,24 @@ export function KitMainPage({
   const [mcpMode, setMcpMode] = useState<McpConfigMode>('stdio')
   const [copiedMcpReceipt, setCopiedMcpReceipt] = useState<boolean>(false)
   const [copiedCliId, setCopiedCliId] = useState<string | null>(null)
+  const [adapters, setAdapters] = useState<CustomAdapterRow[]>([])
+  const [adapterForm, setAdapterForm] = useState<CustomAdapterFormState>(EMPTY_ADAPTER_FORM)
+  const [adapterNotice, setAdapterNotice] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null)
+  const [adapterSecretWarning, setAdapterSecretWarning] = useState<string>('')
+  const [adapterTestResults, setAdapterTestResults] = useState<Record<string, { ok: boolean; message: string }>>({})
   const [cliCards, setCliCards] = useState<AllowlistedCliCardDefV1[]>([...ALLOWLISTED_CLI_CARDS_BROWSER])
   const [cliOutput, setCliOutput] = useState<Record<string, string>>({})
+
+  const loadAdapters = useCallback(async () => {
+    try {
+      const res = await rpc.call<{ adapters?: CustomAdapterRow[] }>('adapter.custom.list', {})
+      if (res?.ok && Array.isArray(res.data?.adapters)) {
+        setAdapters(res.data.adapters)
+      }
+    } catch {
+      // Gracefully tolerate older/mock hosts without adapter.custom.list.
+    }
+  }, [rpc])
 
   const loadCatalogs = useCallback(async () => {
     const [tplRes, cliRes] = await Promise.all([
@@ -225,7 +416,8 @@ export function KitMainPage({
     ])
     if (tplRes.ok && Array.isArray(tplRes.data?.templates) && tplRes.data.templates.length > 0) setTemplates(tplRes.data.templates)
     if (cliRes.ok && Array.isArray(cliRes.data?.operations) && cliRes.data.operations.length > 0) setCliCards(cliRes.data.operations)
-  }, [rpc])
+    await loadAdapters()
+  }, [rpc, loadAdapters])
 
   useEffect(() => {
     void loadCatalogs()
@@ -306,6 +498,94 @@ export function KitMainPage({
       // Clipboard may be unavailable in restricted contexts; still surface receipt.
     }
     setCopiedCliId(id)
+  }
+
+  const handleSaveAdapter = async () => {
+    const adapterId = adapterForm.adapterId.trim()
+    const title = adapterForm.title.trim() || adapterId
+    const authEnvVar = adapterForm.authEnvVar.trim()
+    if (isUnsafeAuthEnvVar(authEnvVar)) {
+      setAdapterSecretWarning(t('adapterSecretWarning'))
+      setAdapterNotice(null)
+      return
+    }
+    setAdapterSecretWarning('')
+    if (!adapterId) return
+    const parsedPrice = adapterForm.unitPriceUsd.trim() ? Number(adapterForm.unitPriceUsd.trim()) : undefined
+    const payload: Record<string, unknown> = {
+      adapterId,
+      title,
+      protocol: adapterForm.protocol,
+      kind: adapterForm.kind,
+      stage: stageForAdapterKind(adapterForm.kind),
+      enabled: adapterForm.enabled,
+      ...(adapterForm.protocol === 'cli_wrapper'
+        ? { binary: adapterForm.binary.trim() }
+        : { endpointUrl: adapterForm.endpointUrl.trim() }),
+      ...(adapterForm.model.trim() ? { model: adapterForm.model.trim() } : {}),
+      ...(typeof parsedPrice === 'number' && Number.isFinite(parsedPrice) && parsedPrice >= 0
+        ? { unitPriceUsd: parsedPrice }
+        : {}),
+      ...(authEnvVar ? { authEnvVar } : {}),
+      ...(adapterForm.allowPrivateNetwork ? { allowPrivateNetwork: true } : {}),
+    }
+    const res = await rpc.call<{ adapter?: CustomAdapterRow; adapters?: CustomAdapterRow[] }>('adapter.custom.save', payload)
+    if (!res?.ok) {
+      setAdapterNotice({ tone: 'bad', text: res?.error?.message ?? '保存失败' })
+      return
+    }
+    setAdapterNotice({ tone: 'ok', text: t('adapterSavedReceipt') })
+    if (Array.isArray(res.data?.adapters)) {
+      setAdapters(res.data.adapters)
+    } else {
+      await loadAdapters()
+    }
+  }
+
+  const handleToggleAdapter = async (adapter: CustomAdapterRow) => {
+    const res = await rpc.call<{ adapters?: CustomAdapterRow[] }>('adapter.custom.save', {
+      adapterId: adapter.adapterId,
+      title: adapter.title,
+      protocol: adapter.protocol,
+      kind: adapter.kind,
+      stage: adapter.stage ?? stageForAdapterKind(adapter.kind),
+      enabled: !adapter.enabled,
+      ...(adapter.endpointUrl ? { endpointUrl: adapter.endpointUrl } : {}),
+      ...(adapter.binary ? { binary: adapter.binary } : {}),
+      ...(adapter.model ? { model: adapter.model } : {}),
+      ...(adapter.unitPriceUsd !== undefined ? { unitPriceUsd: adapter.unitPriceUsd } : {}),
+      ...(adapter.authEnvVar ? { authEnvVar: adapter.authEnvVar } : {}),
+      ...(adapter.allowPrivateNetwork ? { allowPrivateNetwork: true } : {}),
+    })
+    if (res?.ok) {
+      if (Array.isArray(res.data?.adapters)) setAdapters(res.data.adapters)
+      else await loadAdapters()
+    }
+  }
+
+  const handleTestAdapter = async (adapterId: string) => {
+    const res = await rpc.call<{ ok?: boolean; message?: string; reachable?: boolean; detail?: string }>(
+      'adapter.custom.test',
+      { adapterId },
+    )
+    if (!res?.ok) {
+      setAdapterTestResults((prev) => ({
+        ...prev,
+        [adapterId]: { ok: false, message: res?.error?.message ?? t('adapterTestFail') },
+      }))
+      return
+    }
+    const ok = res.data?.ok ?? res.data?.reachable ?? true
+    const message = res.data?.message ?? res.data?.detail ?? (ok ? t('adapterTestOk') : t('adapterTestFail'))
+    setAdapterTestResults((prev) => ({ ...prev, [adapterId]: { ok: Boolean(ok), message } }))
+  }
+
+  const handleRemoveAdapter = async (adapterId: string) => {
+    const res = await rpc.call<{ adapters?: CustomAdapterRow[] }>('adapter.custom.remove', { adapterId })
+    if (res?.ok) {
+      if (Array.isArray(res.data?.adapters)) setAdapters(res.data.adapters)
+      else setAdapters((prev) => prev.filter((item) => item.adapterId !== adapterId))
+    }
   }
 
   const handleRunCliCard = async (operationId: string) => {
@@ -607,6 +887,256 @@ export function KitMainPage({
                     ) : null}
                   </div>
                 </div>
+              </section>
+              <section className="kit-adapter-card mw-dsh-card mw-stack" data-flat="true" data-gap="md" data-kit-adapters-card="true">
+                <SectionHead title={t('adapterCardTitle')} meta={t('adapterCardHint')} />
+                <div className="kit-adapter-presets" data-kit-adapter-presets="true">
+                  {ADAPTER_UI_PRESETS.map((preset) => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      className="mw-dsh-btn"
+                      data-variant="quiet"
+                      data-size="sm"
+                      data-adapter-preset={preset.key}
+                      onClick={() => {
+                        setAdapterForm({ ...preset.form })
+                        setAdapterSecretWarning('')
+                        setAdapterNotice(null)
+                      }}
+                    >
+                      {t(preset.labelKey)}
+                    </button>
+                  ))}
+                </div>
+
+                {adapters.length === 0 ? (
+                  <p className="mw-dsh-muted" data-kit-adapter-empty="true">
+                    {t('adapterEmpty')}
+                  </p>
+                ) : (
+                  <ul className="kit-adapter-list" data-kit-adapter-list="true">
+                    {adapters.map((adapter) => {
+                      const testRes = adapterTestResults[adapter.adapterId]
+                      return (
+                        <li key={adapter.adapterId} className="kit-adapter-row" data-adapter-row={adapter.adapterId}>
+                          <div className="mw-row" data-gap="xs">
+                            <span className="mw-title">{adapter.title}</span>
+                            <span className="mw-chip" data-mono="true">
+                              {adapter.protocol}
+                            </span>
+                            {adapter.model ? (
+                              <span className="mw-chip" data-mono="true">
+                                {adapter.model}
+                              </span>
+                            ) : null}
+                            {adapter.authEnvVar ? (
+                              <span
+                                className="mw-status"
+                                data-tone={adapter.envReady ? 'ok' : 'warn'}
+                                data-adapter-env-ready={adapter.envReady ? 'true' : 'false'}
+                              >
+                                <span className="mw-dot" />
+                                {adapter.envReady ? t('adapterEnvReady') : t('adapterEnvMissing')}
+                              </span>
+                            ) : (
+                              <span className="mw-status" data-tone="neutral" data-adapter-env-ready="true">
+                                <span className="mw-dot" />
+                                {t('adapterEnvNone')}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mw-row" data-gap="xs">
+                            <label className="mw-row" data-gap="xs">
+                              <input
+                                type="checkbox"
+                                checked={adapter.enabled}
+                                data-adapter-toggle={adapter.adapterId}
+                                onChange={() => void handleToggleAdapter(adapter)}
+                              />
+                              <span className="mw-dsh-muted">{t('adapterEnableLabel')}</span>
+                            </label>
+                            <button
+                              type="button"
+                              className="mw-dsh-btn"
+                              data-variant="quiet"
+                              data-size="sm"
+                              data-adapter-test={adapter.adapterId}
+                              onClick={() => void handleTestAdapter(adapter.adapterId)}
+                            >
+                              {t('adapterTestBtn')}
+                            </button>
+                            <button
+                              type="button"
+                              className="mw-dsh-btn"
+                              data-variant="ghost"
+                              data-size="sm"
+                              data-adapter-remove={adapter.adapterId}
+                              onClick={() => void handleRemoveAdapter(adapter.adapterId)}
+                            >
+                              {t('adapterRemoveBtn')}
+                            </button>
+                          </div>
+                          {testRes ? (
+                            <span
+                              className="mw-status"
+                              role="status"
+                              data-tone={testRes.ok ? 'ok' : 'bad'}
+                              data-adapter-test-result={adapter.adapterId}
+                            >
+                              <span className="mw-dot" />
+                              {testRes.message}
+                            </span>
+                          ) : null}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+
+                <form
+                  className="kit-adapter-form"
+                  data-kit-adapter-form="true"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void handleSaveAdapter()
+                  }}
+                >
+                  <label className="mw-field">
+                    <span>{t('adapterFieldId')}</span>
+                    <input
+                      className="mw-input"
+                      type="text"
+                      data-adapter-field="id"
+                      value={adapterForm.adapterId}
+                      onChange={(e) => setAdapterForm((prev) => ({ ...prev, adapterId: e.target.value }))}
+                    />
+                  </label>
+                  <label className="mw-field">
+                    <span>{t('adapterFieldTitle')}</span>
+                    <input
+                      className="mw-input"
+                      type="text"
+                      data-adapter-field="title"
+                      value={adapterForm.title}
+                      onChange={(e) => setAdapterForm((prev) => ({ ...prev, title: e.target.value }))}
+                    />
+                  </label>
+                  <label className="mw-field">
+                    <span>{t('adapterFieldProtocol')}</span>
+                    <select
+                      className="mw-input"
+                      data-adapter-field="protocol"
+                      value={adapterForm.protocol}
+                      onChange={(e) =>
+                        setAdapterForm((prev) => ({ ...prev, protocol: e.target.value as CustomAdapterProtocol }))
+                      }
+                    >
+                      <option value="openai_http">openai_http</option>
+                      <option value="comfyui_http">comfyui_http</option>
+                      <option value="cli_wrapper">cli_wrapper</option>
+                    </select>
+                  </label>
+                  <label className="mw-field">
+                    <span>{t('adapterFieldKind')}</span>
+                    <select
+                      className="mw-input"
+                      data-adapter-field="kind"
+                      value={adapterForm.kind}
+                      onChange={(e) => setAdapterForm((prev) => ({ ...prev, kind: e.target.value as CustomAdapterKind }))}
+                    >
+                      <option value="image">image</option>
+                      <option value="voice">voice</option>
+                      <option value="video">video</option>
+                      <option value="sfx">sfx</option>
+                    </select>
+                  </label>
+                  {adapterForm.protocol === 'cli_wrapper' ? (
+                    <label className="mw-field">
+                      <span>{t('adapterFieldBinary')}</span>
+                      <input
+                        className="mw-input"
+                        type="text"
+                        data-adapter-field="binary"
+                        value={adapterForm.binary}
+                        onChange={(e) => setAdapterForm((prev) => ({ ...prev, binary: e.target.value }))}
+                      />
+                    </label>
+                  ) : (
+                    <label className="mw-field">
+                      <span>{t('adapterFieldEndpoint')}</span>
+                      <input
+                        className="mw-input"
+                        type="text"
+                        data-adapter-field="endpoint"
+                        value={adapterForm.endpointUrl}
+                        onChange={(e) => setAdapterForm((prev) => ({ ...prev, endpointUrl: e.target.value }))}
+                      />
+                    </label>
+                  )}
+                  <label className="mw-field">
+                    <span>{t('adapterFieldModel')}</span>
+                    <input
+                      className="mw-input"
+                      type="text"
+                      data-adapter-field="model"
+                      value={adapterForm.model}
+                      onChange={(e) => setAdapterForm((prev) => ({ ...prev, model: e.target.value }))}
+                    />
+                  </label>
+                  <label className="mw-field">
+                    <span>{t('adapterFieldPrice')}</span>
+                    <input
+                      className="mw-input"
+                      type="text"
+                      data-adapter-field="unitPriceUsd"
+                      value={adapterForm.unitPriceUsd}
+                      onChange={(e) => setAdapterForm((prev) => ({ ...prev, unitPriceUsd: e.target.value }))}
+                    />
+                  </label>
+                  <label className="mw-field">
+                    <span>{t('adapterFieldAuthEnv')}</span>
+                    <input
+                      className="mw-input"
+                      type="text"
+                      data-adapter-field="authEnvVar"
+                      placeholder="OPENAI_API_KEY"
+                      value={adapterForm.authEnvVar}
+                      onChange={(e) => {
+                        const nextVal = e.target.value
+                        setAdapterForm((prev) => ({ ...prev, authEnvVar: nextVal }))
+                        if (isUnsafeAuthEnvVar(nextVal)) setAdapterSecretWarning(t('adapterSecretWarning'))
+                        else setAdapterSecretWarning('')
+                      }}
+                    />
+                  </label>
+                  <label className="mw-row" data-gap="xs">
+                    <input
+                      type="checkbox"
+                      data-adapter-field="allowPrivateNetwork"
+                      checked={adapterForm.allowPrivateNetwork}
+                      onChange={(e) => setAdapterForm((prev) => ({ ...prev, allowPrivateNetwork: e.target.checked }))}
+                    />
+                    <span className="mw-dsh-muted">{t('adapterFieldPrivateNet')}</span>
+                  </label>
+                  <div className="mw-row" data-gap="sm">
+                    <button type="submit" className="mw-dsh-btn" data-variant="primary" data-size="sm" data-adapter-save="true">
+                      {t('adapterSaveBtn')}
+                    </button>
+                    {adapterNotice ? (
+                      <span className="mw-status" role="status" data-tone={adapterNotice.tone} data-adapter-notice="true">
+                        <span className="mw-dot" />
+                        {adapterNotice.text}
+                      </span>
+                    ) : null}
+                  </div>
+                  {adapterSecretWarning ? (
+                    <div className="mw-dsh-notice" data-tone="bad" role="alert" data-adapter-secret-warning="true">
+                      <span className="mw-dot" />
+                      <span>{adapterSecretWarning}</span>
+                    </div>
+                  ) : null}
+                </form>
               </section>
               {cliCards.length === 0 ? (
                 <EmptyState>{coreT('emptyElements')}</EmptyState>

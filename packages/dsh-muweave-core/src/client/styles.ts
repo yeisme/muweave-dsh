@@ -6214,6 +6214,163 @@ button.dr-clip:focus-visible,
   outline: 2px solid var(--mw-accent);
   outline-offset: 2px;
 }
+
+/* ---------- Bridge, Multi-Episode Cut & Export (v7) ---------- */
+
+.dr-episode-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--mw-s-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: var(--mw-s-1) 0;
+  min-width: 0;
+}
+
+.dr-episode-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.dr-episode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  min-height: 1.875rem;
+  padding: 0 var(--mw-s-3);
+  border-radius: var(--mw-r-pill);
+  border: 1px solid var(--mw-line);
+  background: var(--mw-surface);
+  color: var(--mw-label-2);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--mw-dur-fast) var(--mw-ease), border-color var(--mw-dur-fast) var(--mw-ease),
+    color var(--mw-dur-fast) var(--mw-ease);
+}
+
+.dr-episode-pill:hover {
+  border-color: var(--mw-line-strong);
+  background: var(--mw-fill-1);
+  color: var(--mw-label);
+}
+
+.dr-episode-pill[aria-pressed="true"] {
+  border-color: var(--mw-line-strong);
+  background: var(--mw-selected);
+  color: var(--mw-label);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--mw-line-strong);
+}
+
+.dr-cut-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mw-s-2);
+  padding: var(--mw-s-2) var(--mw-s-3);
+  border-radius: var(--mw-r-xl);
+  border: 1px solid var(--mw-line-strong);
+  background: color-mix(in oklch, var(--mw-info) 10%, var(--mw-card));
+  font-size: 0.75rem;
+  color: var(--mw-label);
+}
+
+.dr-cut-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mw-s-1);
+  min-width: 0;
+}
+
+.dr-shot-omitted {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.kit-adapter-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-3);
+  padding: var(--mw-s-4);
+  border-radius: var(--mw-r-xl);
+  border: 1px solid var(--mw-line);
+  background: var(--mw-card);
+  box-shadow: var(--mw-elev-1);
+  min-width: 0;
+}
+
+.kit-adapter-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mw-s-1);
+}
+
+.kit-adapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kit-adapter-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mw-s-2);
+  padding: var(--mw-s-3);
+  border-radius: var(--mw-r-2);
+  border: 1px solid var(--mw-line);
+  background: var(--mw-fill-1);
+  min-width: 0;
+}
+
+.kit-adapter-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--mw-s-2) var(--mw-s-3);
+  padding: var(--mw-s-3);
+  border-radius: var(--mw-r-2);
+  border: 1px solid var(--mw-line);
+  background: var(--mw-fill-1);
+  min-width: 0;
+}
+
+.dr-episode-pill:focus-visible,
+.dr-cut-controls button:focus-visible,
+.dr-cut-controls select:focus-visible,
+.dr-cut-controls input:focus-visible,
+.kit-adapter-card button:focus-visible,
+.kit-adapter-card input:focus-visible,
+.kit-adapter-card select:focus-visible {
+  outline: 2px solid var(--mw-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dr-episode-pill {
+    transition: none;
+  }
+}
+
+@media (max-width: 48rem) {
+  .kit-adapter-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 30rem) {
+  .kit-adapter-card,
+  .kit-adapter-form {
+    padding: var(--mw-s-2);
+  }
+}
 `
 
 interface SharedStyleHolder {

@@ -9,6 +9,7 @@ import {
   mediaForRole,
   shotDescription,
   stageItemToFloatingAgent,
+  type CutTransitionKind,
   type LinkedMediaRef,
   type MuweaveRpcClient,
   type MuweaveTone,
@@ -209,6 +210,14 @@ export interface ShotInspectorProps {
   allShots?: readonly StoryboardRow[]
   allReviews?: Readonly<Record<string, ShotReviewRecordV1>>
   onSelectShot?: (shotRef: string) => void
+  cutDurationMicros?: number
+  cutTransition?: CutTransitionKind
+  cutOmitted?: boolean
+  onUpdateCut?: (patch: {
+    durationMicros?: number
+    transition?: CutTransitionKind
+    omitted?: boolean
+  }) => Promise<void> | void
   onReviewSaved: (record: ShotReviewRecordV1) => void
   onReloadReviews: () => Promise<void>
   onMediaChanged: () => Promise<void>
@@ -237,6 +246,10 @@ export function ShotInspector({
   allShots,
   allReviews,
   onSelectShot,
+  cutDurationMicros,
+  cutTransition,
+  cutOmitted,
+  onUpdateCut,
   onReviewSaved,
   onReloadReviews,
   onMediaChanged,
@@ -444,6 +457,82 @@ export function ShotInspector({
               {formatCell(v)}
             </span>
           ))}
+        </div>
+      ) : null}
+
+      {onUpdateCut ? (
+        <div className="dr-inspector-section mw-stack" data-gap="xs" data-inspector-cut-controls="true">
+          <span className="mw-eyebrow">{t('cutControlsTitle')}</span>
+          <div className="dr-cut-controls mw-row" data-gap="xs">
+            <button
+              type="button"
+              className="mw-dsh-btn"
+              data-size="sm"
+              data-variant="ghost"
+              data-cut-trim-minus="true"
+              onClick={() => {
+                const cur = cutDurationMicros ?? shot.plannedDurationMicros
+                const next = Math.max(200_000, cur - 500_000)
+                void onUpdateCut({ durationMicros: next })
+              }}
+            >
+              -0.5s
+            </button>
+            <input
+              type="number"
+              className="mw-dsh-input"
+              step="0.5"
+              min="0.2"
+              max="300"
+              aria-label={t('cutDurationLabel')}
+              data-cut-duration-input="true"
+              value={Number(((cutDurationMicros ?? shot.plannedDurationMicros) / 1_000_000).toFixed(1))}
+              onChange={(ev) => {
+                const sec = Number(ev.target.value)
+                if (!Number.isFinite(sec)) return
+                const clamped = Math.min(300_000_000, Math.max(200_000, Math.round(sec * 1_000_000)))
+                void onUpdateCut({ durationMicros: clamped })
+              }}
+            />
+            <button
+              type="button"
+              className="mw-dsh-btn"
+              data-size="sm"
+              data-variant="ghost"
+              data-cut-trim-plus="true"
+              onClick={() => {
+                const cur = cutDurationMicros ?? shot.plannedDurationMicros
+                const next = Math.min(300_000_000, cur + 500_000)
+                void onUpdateCut({ durationMicros: next })
+              }}
+            >
+              +0.5s
+            </button>
+          </div>
+          <div className="dr-cut-controls mw-spread">
+            <select
+              className="mw-dsh-input"
+              aria-label={t('cutTransitionLabel')}
+              data-cut-transition-select="true"
+              value={cutTransition ?? 'cut'}
+              onChange={(ev) => void onUpdateCut({ transition: ev.target.value as CutTransitionKind })}
+            >
+              <option value="cut">{t('transition_cut')}</option>
+              <option value="crossfade">{t('transition_crossfade')}</option>
+              <option value="dip_to_black">{t('transition_dip_to_black')}</option>
+            </select>
+            <button
+              type="button"
+              className="mw-dsh-btn"
+              data-size="sm"
+              data-variant="ghost"
+              data-cut-inspector-omit="true"
+              aria-pressed={Boolean(cutOmitted)}
+              onClick={() => void onUpdateCut({ omitted: !cutOmitted })}
+            >
+              {cutOmitted ? t('cutRestore') : t('cutOmit')}
+            </button>
+          </div>
         </div>
       ) : null}
 

@@ -159,6 +159,7 @@ export interface TimelineViewProps {
   details: Record<string, MuweaveElementV1>
   shotRows: readonly StoryboardRow[]
   reviewsByShot: Record<string, ShotReviewRecordV1>
+  episodeRef?: string
   onInspectShot: (shotRef: string) => void
   onNotice?: (notice: WorkspaceNotice) => void
   t: (k: string) => string
@@ -171,6 +172,7 @@ export function TimelineView({
   details,
   shotRows,
   reviewsByShot,
+  episodeRef,
   onInspectShot,
   onNotice,
   t,
@@ -199,6 +201,7 @@ export function TimelineView({
         format,
         fps,
         aspectRatio,
+        ...(episodeRef ? { episodeRef } : {}),
       })
       if (!res.ok) {
         setExportError(res.error.message)
@@ -289,6 +292,30 @@ export function TimelineView({
             onClick={() => void handleExport('shotlist_csv', primaryFps, primaryAspect)}
           >
             {t('exportShotlistCsv')}
+          </button>
+          <button
+            type="button"
+            className="mw-dsh-btn"
+            data-size="sm"
+            data-variant="quiet"
+            data-export-format="fcpxml_1_10"
+            data-drama-export-fcpxml="true"
+            disabled={exportingFormat !== null}
+            onClick={() => void handleExport('fcpxml_1_10', primaryFps, primaryAspect)}
+          >
+            {t('exportFcpxml')}
+          </button>
+          <button
+            type="button"
+            className="mw-dsh-btn"
+            data-size="sm"
+            data-variant="quiet"
+            data-export-format="jianying_draft_v1"
+            data-drama-export-jianying="true"
+            disabled={exportingFormat !== null}
+            onClick={() => void handleExport('jianying_draft_v1', primaryFps, primaryAspect)}
+          >
+            {t('exportJianying')}
           </button>
           <button
             type="button"

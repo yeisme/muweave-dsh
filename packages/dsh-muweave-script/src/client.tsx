@@ -68,6 +68,8 @@ const zh = {
   estDurationSec: '约 {sec} 秒',
   estEpisodeTotal: '全集估算时长',
   seconds: '秒',
+  allEpisodes: '全部集',
+  episodeFilterLabel: '分集切换',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -112,6 +114,8 @@ const en: Record<keyof typeof zh, string> = {
   estDurationSec: '~{sec}s',
   estEpisodeTotal: 'Est. Episode Duration',
   seconds: 's',
+  allEpisodes: 'All Episodes',
+  episodeFilterLabel: 'Episode Switcher',
 }
 
 export function ScriptIcon({ size = 16, active = false }: { size?: number; active?: boolean }) {
@@ -156,6 +160,7 @@ export function ScriptMainPage({
   const [editingSceneId, setEditingSceneId] = useState<string | undefined>(undefined)
   const [focusedSceneId, setFocusedSceneId] = useState<string | undefined>(undefined)
   const [sceneViewMode, setSceneViewMode] = useState<SceneViewMode>('cards')
+  const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
   const [goalInput, setGoalInput] = useState('')
   const [obstacleInput, setObstacleInput] = useState('')
   const [turnInput, setTurnInput] = useState('')
@@ -222,10 +227,36 @@ export function ScriptMainPage({
     await loadScript()
   }
 
-  const timelines = elements.filter((e) => e.kind === 'script.timeline')
-  const sceneCards = elements.filter((e) => e.kind === 'script.scene_card')
-  const graphs = elements.filter((e) => e.kind === 'script.context_graph')
-  const diffs = elements.filter((e) => e.kind === 'script.candidate_diff')
+  const episodeOf = useCallback(
+    (el: MuweaveElementSummaryV1): string | undefined => {
+      if (el.episodeRef) return el.episodeRef
+      const pl = (details[el.elementId]?.payload ?? {}) as { episodeRef?: string }
+      return typeof pl.episodeRef === 'string' && pl.episodeRef ? pl.episodeRef : undefined
+    },
+    [details],
+  )
+
+  const episodes = useMemo(() => {
+    const set = new Set<string>()
+    for (const el of elements) {
+      const ep = episodeOf(el)
+      if (ep) set.add(ep)
+    }
+    return Array.from(set)
+  }, [elements, episodeOf])
+
+  const matchesEpisode = useCallback(
+    (el: MuweaveElementSummaryV1) => {
+      if (selectedEpisode === 'all') return true
+      return episodeOf(el) === selectedEpisode
+    },
+    [selectedEpisode, episodeOf],
+  )
+
+  const timelines = elements.filter((e) => e.kind === 'script.timeline' && matchesEpisode(e))
+  const sceneCards = elements.filter((e) => e.kind === 'script.scene_card' && matchesEpisode(e))
+  const graphs = elements.filter((e) => e.kind === 'script.context_graph' && matchesEpisode(e))
+  const diffs = elements.filter((e) => e.kind === 'script.candidate_diff' && matchesEpisode(e))
 
   const lang = coreT('langCode')
   const staleCount = elements.filter((e) => e.stale).length
@@ -271,6 +302,43 @@ export function ScriptMainPage({
       onSyncRequested={loadScript}
       notice={notice}
       onDismissNotice={() => setNotice(null)}
+      projectBar={
+        episodes.length > 1 ? (
+          <div
+            className="dr-episode-bar mw-row"
+            data-gap="xs"
+            data-script-episode-switcher="true"
+            role="group"
+            aria-label={t('episodeFilterLabel')}
+          >
+            <button
+              type="button"
+              className="dr-episode-pill mw-dsh-btn"
+              data-size="sm"
+              data-variant="ghost"
+              data-episode-pill="all"
+              aria-pressed={selectedEpisode === 'all'}
+              onClick={() => setSelectedEpisode('all')}
+            >
+              {t('allEpisodes')}
+            </button>
+            {episodes.map((ep) => (
+              <button
+                key={ep}
+                type="button"
+                className="dr-episode-pill mw-dsh-btn"
+                data-size="sm"
+                data-variant="ghost"
+                data-episode-pill={ep}
+                aria-pressed={selectedEpisode === ep}
+                onClick={() => setSelectedEpisode(ep)}
+              >
+                {ep}
+              </button>
+            ))}
+          </div>
+        ) : undefined
+      }
       hero={
         <RoomHero
           eyebrow={t('heroEyebrow')}

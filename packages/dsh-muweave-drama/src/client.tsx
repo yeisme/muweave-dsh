@@ -23,7 +23,9 @@ import {
   stageItemToFloatingAgent,
   statusTone,
   useProjectCovers,
+  type CutTransitionKind,
   type DshClientContextLike,
+  type EpisodeCutOverrideV1,
   type MuweaveElementSummaryV1,
   type MuweaveElementV1,
   type MuweaveRpcClient,
@@ -175,6 +177,25 @@ const zh = {
   mdSummaryTitle: '分镜审片纪要',
   mdMissingRoles: '缺失轨',
   mdAllRolesReady: '全轨齐套',
+  allEpisodes: '全部集',
+  episodeFilterLabel: '分集切换',
+  cutBannerLabel: '已启用无损粗剪覆写',
+  cutModifiedItems: '项微调',
+  cutResetBtn: '重置回原序',
+  cutResetDone: '已重置本集粗剪覆写',
+  cutMoveUp: '上移',
+  cutMoveDown: '下移',
+  cutOmit: '跳过',
+  cutRestore: '恢复',
+  cutOmittedBadge: '已跳过',
+  cutControlsTitle: '粗剪微调',
+  cutDurationLabel: '时长 (秒)',
+  cutTransitionLabel: '转场',
+  transition_cut: '硬切 (Cut)',
+  transition_crossfade: '叠化 (Crossfade)',
+  transition_dip_to_black: '黑场 (Dip to Black)',
+  exportFcpxml: '导出 FCPXML',
+  exportJianying: '导出剪映草稿',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -296,6 +317,25 @@ const en: Record<keyof typeof zh, string> = {
   mdSummaryTitle: 'Storyboard Review Summary',
   mdMissingRoles: 'Missing',
   mdAllRolesReady: 'All roles ready',
+  allEpisodes: 'All Episodes',
+  episodeFilterLabel: 'Episode Switcher',
+  cutBannerLabel: 'Non-destructive cut overrides active',
+  cutModifiedItems: 'overrides',
+  cutResetBtn: 'Reset to Original',
+  cutResetDone: 'Episode cut overrides reset',
+  cutMoveUp: 'Move Up',
+  cutMoveDown: 'Move Down',
+  cutOmit: 'Omit',
+  cutRestore: 'Restore',
+  cutOmittedBadge: 'Omitted',
+  cutControlsTitle: 'Rough-Cut Trim',
+  cutDurationLabel: 'Duration (s)',
+  cutTransitionLabel: 'Transition',
+  transition_cut: 'Cut',
+  transition_crossfade: 'Crossfade',
+  transition_dip_to_black: 'Dip to Black',
+  exportFcpxml: 'Export FCPXML',
+  exportJianying: 'Export Jianying Draft',
 }
 
 type ViewMode = 'cards' | 'table'
@@ -361,6 +401,9 @@ export function DramaMainPage({
   const [notice, setNotice] = useState<WorkspaceNotice | null>(null)
   const [selectedShotRefs, setSelectedShotRefs] = useState<Set<string>>(() => new Set())
   const [batchBusy, setBatchBusy] = useState(false)
+  const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
+  const [cutOverride, setCutOverride] = useState<EpisodeCutOverrideV1 | null>(null)
+  const [cutBusy, setCutBusy] = useState(false)
 
   const loadReviews = useCallback(async () => {
     const revRes = await rpc.call<{ reviews?: ShotReviewRecordV1[] }>('drama.shot.review.list', {})
@@ -424,20 +467,243 @@ export function DramaMainPage({
   const covers = useProjectCovers(rpc, 3)
   const [view, setView] = useState<ViewMode>('cards')
 
+  const episodeOfBoard = useCallback(
+    (sb: MuweaveElementSummaryV1): string => {
+      if (sb.episodeRef) return sb.episodeRef
+      const pl = (details[sb.elementId]?.payload ?? {}) as { episodeRef?: string }
+      if (typeof pl.episodeRef === 'string' && pl.episodeRef) return pl.episodeRef
+      return sb.sourceRef || sb.elementId
+    },
+    [details],
+  )
+
+  const episodes = useMemo(() => {
+    const set = new Set<string>()
+    for (const sb of storyboards) {
+      set.add(episodeOfBoard(sb))
+    }
+    return Array.from(set)
+  }, [storyboards, episodeOfBoard])
+
+  const visibleStoryboards = useMemo(
+    () =>
+      selectedEpisode === 'all'
+        ? storyboards
+        : storyboards.filter((sb) => episodeOfBoard(sb) === selectedEpisode),
+    [storyboards, selectedEpisode, episodeOfBoard],
+  )
+
+  const activeCutEpisode = selectedEpisode !== 'all' ? selectedEpisode : episodes[0]
+
+  const loadCutOverride = useCallback(async () => {
+    if (!activeCutEpisode) {
+      setCutOverride(null)
+      return
+    }
+    const res = await rpc.call<{ cut?: EpisodeCutOverrideV1 | null }>('drama.cut.get', {
+      episodeRef: activeCutEpisode,
+    })
+    if (res.ok) {
+      setCutOverride(res.data?.cut ?? null)
+    }
+  }, [rpc, activeCutEpisode])
+
+  useEffect(() => {
+    void loadCutOverride()
+  }, [loadCutOverride])
+
+  const applyCutToRows = useCallback(
+    (rows: readonly StoryboardRow[]): StoryboardRow[] => {
+      if (!cutOverride) return [...rows]
+      const byRef = new Map(rows.map((r) => [r.shotRef, r]))
+      const ordered: StoryboardRow[] = []
+      const seen = new Set<string>()
+      for (const ref of cutOverride.shotOrder ?? []) {
+        const hit = byRef.get(ref)
+        if (hit && !seen.has(ref)) {
+          seen.add(ref)
+          ordered.push(hit)
+        }
+      }
+      for (const r of rows) {
+        if (!seen.has(r.shotRef)) {
+          seen.add(r.shotRef)
+          ordered.push(r)
+        }
+      }
+      return ordered.map((r) => {
+        const durOverride = cutOverride.durationOverridesMicros?.[r.shotRef]
+        return typeof durOverride === 'number' ? { ...r, plannedDurationMicros: durOverride } : r
+      })
+    },
+    [cutOverride],
+  )
+
+  const omittedShotSet = useMemo(
+    () => new Set(cutOverride?.omittedShotRefs ?? []),
+    [cutOverride],
+  )
+
   const shotEntries = useMemo(
     () =>
-      storyboards.flatMap((sb) => {
-        const rows = ((details[sb.elementId]?.payload ?? {}) as { rows?: StoryboardRow[] }).rows ?? []
+      visibleStoryboards.flatMap((sb) => {
+        const rawRows = ((details[sb.elementId]?.payload ?? {}) as { rows?: StoryboardRow[] }).rows ?? []
+        const rows = applyCutToRows(rawRows)
+        const epRef = episodeOfBoard(sb)
         return rows.map((row) => ({
           row,
           storyboardElementId: sb.elementId,
-          episodeRef: sb.sourceRef,
+          episodeRef: epRef,
         }))
       }),
-    [storyboards, details],
+    [visibleStoryboards, details, applyCutToRows, episodeOfBoard],
   )
 
   const shotRows = useMemo(() => shotEntries.map((e) => e.row), [shotEntries])
+  const activeCutRows = useMemo(
+    () => shotRows.filter((r) => !omittedShotSet.has(r.shotRef)),
+    [shotRows, omittedShotSet],
+  )
+
+  const cutOverrideCount = useMemo(() => {
+    if (!cutOverride) return 0
+    return (
+      (cutOverride.shotOrder?.length ? 1 : 0) +
+      (cutOverride.omittedShotRefs?.length ?? 0) +
+      Object.keys(cutOverride.durationOverridesMicros ?? {}).length +
+      Object.keys(cutOverride.transitions ?? {}).length
+    )
+  }, [cutOverride])
+
+  const saveCutOverride = useCallback(
+    async (next: {
+      shotOrder: string[]
+      omittedShotRefs: string[]
+      durationOverridesMicros: Record<string, number>
+      transitions: Record<string, CutTransitionKind>
+    }) => {
+      if (!activeCutEpisode) return
+      setCutBusy(true)
+      try {
+        const res = await rpc.call<{ cut?: EpisodeCutOverrideV1 }>('drama.cut.set', {
+          episodeRef: activeCutEpisode,
+          shotOrder: next.shotOrder,
+          omittedShotRefs: next.omittedShotRefs,
+          durationOverridesMicros: next.durationOverridesMicros,
+          transitions: next.transitions,
+          expectedRevision: cutOverride?.revision ?? 0,
+        })
+        if (!res.ok) {
+          setNotice({ tone: 'bad', text: res.error.message })
+          return
+        }
+        if (res.data?.cut) {
+          setCutOverride(res.data.cut)
+        } else {
+          await loadCutOverride()
+        }
+      } finally {
+        setCutBusy(false)
+      }
+    },
+    [rpc, activeCutEpisode, cutOverride, loadCutOverride],
+  )
+
+  const handleMoveShot = useCallback(
+    async (shotRef: string, direction: -1 | 1) => {
+      const currentOrder = shotRows.map((r) => r.shotRef)
+      const idx = currentOrder.indexOf(shotRef)
+      const targetIdx = idx + direction
+      if (idx < 0 || targetIdx < 0 || targetIdx >= currentOrder.length) return
+      const nextOrder = [...currentOrder]
+      const [moved] = nextOrder.splice(idx, 1)
+      nextOrder.splice(targetIdx, 0, moved!)
+      await saveCutOverride({
+        shotOrder: nextOrder,
+        omittedShotRefs: cutOverride?.omittedShotRefs ?? [],
+        durationOverridesMicros: cutOverride?.durationOverridesMicros ?? {},
+        transitions: cutOverride?.transitions ?? {},
+      })
+    },
+    [shotRows, cutOverride, saveCutOverride],
+  )
+
+  const handleToggleOmitShot = useCallback(
+    async (shotRef: string, forceOmitted?: boolean) => {
+      const cur = new Set(cutOverride?.omittedShotRefs ?? [])
+      const nextOmitted = forceOmitted ?? !cur.has(shotRef)
+      if (nextOmitted) cur.add(shotRef)
+      else cur.delete(shotRef)
+      await saveCutOverride({
+        shotOrder: cutOverride?.shotOrder ?? shotRows.map((r) => r.shotRef),
+        omittedShotRefs: Array.from(cur),
+        durationOverridesMicros: cutOverride?.durationOverridesMicros ?? {},
+        transitions: cutOverride?.transitions ?? {},
+      })
+    },
+    [shotRows, cutOverride, saveCutOverride],
+  )
+
+  const handleUpdateShotCut = useCallback(
+    async (
+      shotRef: string,
+      patch: { durationMicros?: number; transition?: CutTransitionKind; omitted?: boolean },
+    ) => {
+      const nextDurations = { ...(cutOverride?.durationOverridesMicros ?? {}) }
+      if (typeof patch.durationMicros === 'number') {
+        nextDurations[shotRef] = patch.durationMicros
+      }
+      const nextTransitions = { ...(cutOverride?.transitions ?? {}) }
+      if (patch.transition) {
+        nextTransitions[shotRef] = patch.transition
+      }
+      const nextOmittedSet = new Set(cutOverride?.omittedShotRefs ?? [])
+      if (typeof patch.omitted === 'boolean') {
+        if (patch.omitted) nextOmittedSet.add(shotRef)
+        else nextOmittedSet.delete(shotRef)
+      }
+      await saveCutOverride({
+        shotOrder: cutOverride?.shotOrder ?? shotRows.map((r) => r.shotRef),
+        omittedShotRefs: Array.from(nextOmittedSet),
+        durationOverridesMicros: nextDurations,
+        transitions: nextTransitions,
+      })
+    },
+    [shotRows, cutOverride, saveCutOverride],
+  )
+
+  const handleResetCut = useCallback(async () => {
+    if (!activeCutEpisode) return
+    setCutBusy(true)
+    try {
+      const res = await rpc.call<{ reset?: boolean }>('drama.cut.reset', { episodeRef: activeCutEpisode })
+      if (!res.ok) {
+        setNotice({ tone: 'bad', text: res.error.message })
+        return
+      }
+      setCutOverride(null)
+      setNotice({ tone: 'ok', text: t('cutResetDone') })
+    } finally {
+      setCutBusy(false)
+    }
+  }, [rpc, activeCutEpisode, t])
+
+  const episodeMetrics = useMemo(() => {
+    const map = new Map<string, { shotCount: number; totalMicros: number; approvedCount: number }>()
+    for (const sb of storyboards) {
+      const ep = episodeOfBoard(sb)
+      const rows = ((details[sb.elementId]?.payload ?? {}) as { rows?: StoryboardRow[] }).rows ?? []
+      const prev = map.get(ep) ?? { shotCount: 0, totalMicros: 0, approvedCount: 0 }
+      prev.shotCount += rows.length
+      for (const r of rows) {
+        prev.totalMicros += r.plannedDurationMicros
+        const st = reviewsByShot[r.shotRef]?.status
+        if (st === 'approved' || st === 'locked') prev.approvedCount += 1
+      }
+      map.set(ep, prev)
+    }
+    return map
+  }, [storyboards, details, reviewsByShot, episodeOfBoard])
   const totalMicros = shotRows.reduce((sum, r) => sum + r.plannedDurationMicros, 0)
   const assetRows = assetTables.flatMap(
     (at) => ((details[at.elementId]?.payload ?? {}) as { assets?: AssetRow[] }).assets ?? [],
@@ -687,7 +953,52 @@ export function DramaMainPage({
       t={coreT}
       notice={notice}
       onDismissNotice={() => setNotice(null)}
-      onSyncRequested={loadAll}
+      onSyncRequested={async () => {
+        await loadAll()
+        await loadCutOverride()
+      }}
+      projectBar={
+        episodes.length > 0 ? (
+          <div
+            className="dr-episode-bar mw-row"
+            data-gap="xs"
+            data-episode-switcher="true"
+            role="group"
+            aria-label={t('episodeFilterLabel')}
+          >
+            <button
+              type="button"
+              className="dr-episode-pill mw-dsh-btn"
+              data-size="sm"
+              data-variant="ghost"
+              data-episode-pill="all"
+              aria-pressed={selectedEpisode === 'all'}
+              onClick={() => setSelectedEpisode('all')}
+            >
+              {t('allEpisodes')}
+            </button>
+            {episodes.map((ep) => {
+              const m = episodeMetrics.get(ep) ?? { shotCount: 0, totalMicros: 0, approvedCount: 0 }
+              return (
+                <button
+                  key={ep}
+                  type="button"
+                  className="dr-episode-pill mw-dsh-btn"
+                  data-size="sm"
+                  data-variant="ghost"
+                  data-episode-pill={ep}
+                  aria-pressed={selectedEpisode === ep}
+                  onClick={() => setSelectedEpisode(ep)}
+                >
+                  {ep} · {m.shotCount}
+                  {t('shotCount')} · {formatDurationSec(m.totalMicros)}
+                  {t('seconds')} · {m.approvedCount}/{m.shotCount}
+                </button>
+              )
+            })}
+          </div>
+        ) : undefined
+      }
       rightInspector={
         selectedEntry ? (
           <ShotInspector
@@ -705,6 +1016,13 @@ export function DramaMainPage({
             allShots={navShots}
             allReviews={reviewsByShot}
             onSelectShot={setSelectedShotRef}
+            cutDurationMicros={
+              cutOverride?.durationOverridesMicros?.[selectedEntry.row.shotRef] ??
+              selectedEntry.row.plannedDurationMicros
+            }
+            cutTransition={cutOverride?.transitions?.[selectedEntry.row.shotRef] ?? 'cut'}
+            cutOmitted={omittedShotSet.has(selectedEntry.row.shotRef)}
+            onUpdateCut={(patch) => handleUpdateShotCut(selectedEntry.row.shotRef, patch)}
             onReviewSaved={handleReviewSaved}
             onReloadReviews={loadReviews}
             onMediaChanged={loadAll}
@@ -887,10 +1205,29 @@ export function DramaMainPage({
                   </div>
                 </div>
 
+                {cutOverride && cutOverrideCount > 0 ? (
+                  <div className="dr-cut-banner mw-spread" data-drama-cut-banner="true" role="status">
+                    <span className="mw-dsh-muted">
+                      {t('cutBannerLabel')} ({cutOverrideCount} {t('cutModifiedItems')} · v{cutOverride.revision})
+                    </span>
+                    <button
+                      type="button"
+                      className="mw-dsh-btn"
+                      data-size="sm"
+                      data-variant="ghost"
+                      data-drama-cut-reset="true"
+                      disabled={cutBusy}
+                      onClick={() => void handleResetCut()}
+                    >
+                      {t('cutResetBtn')}
+                    </button>
+                  </div>
+                ) : null}
+
                 {animaticOpen ? (
                   <AnimaticPlayer
                     rpc={rpc}
-                    rows={filteredAllShots}
+                    rows={filteredAllShots.filter((r) => !omittedShotSet.has(r.shotRef))}
                     reviews={reviewsByShot}
                     initialShotRef={selectedShotRef ?? undefined}
                     onSelectShot={(ref) => setSelectedShotRef(ref)}
@@ -898,9 +1235,9 @@ export function DramaMainPage({
                   />
                 ) : null}
 
-                {storyboards.map((sb) => {
+                {visibleStoryboards.map((sb) => {
                   const pl = (details[sb.elementId]?.payload ?? {}) as { rows?: StoryboardRow[] }
-                  const rows = (pl.rows ?? []).filter(matchesShotFilters)
+                  const rows = applyCutToRows(pl.rows ?? []).filter(matchesShotFilters)
                   const restricted = Array.from(new Set(rows.flatMap((r) => r.restrictedFields)))
                   return (
                     <section key={sb.elementId} className="mw-stack" data-gap="sm">
@@ -911,17 +1248,19 @@ export function DramaMainPage({
                       />
                       {view === 'cards' ? (
                         <div className="mw-board" data-drama-shot-board="true">
-                          {rows.map((row) => {
+                          {rows.map((row, rowIdx) => {
                             const fields = Object.entries(row.cells)
                               .filter(([k]) => !row.restrictedFields.includes(k))
                               .map(([, v]) => formatCell(v))
                             const review = reviewsByShot[row.shotRef]
                             const reviewStatus = review?.status ?? 'draft'
+                            const isOmitted = omittedShotSet.has(row.shotRef)
                             return (
                               <MediaCard
                                 key={row.shotRef}
                                 ratio="16 / 10"
                                 data-muweave-shot-card={row.shotRef}
+                                data-shot-omitted={isOmitted ? 'true' : undefined}
                                 data-selected={selectedShotRef === row.shotRef ? 'true' : undefined}
                                 media={
                                   <ShotMedia
@@ -997,6 +1336,42 @@ export function DramaMainPage({
                                   >
                                     {t('inspectShot')}
                                   </button>
+                                </div>
+                                <div className={`dr-cut-controls mw-row${isOmitted ? ' dr-shot-omitted' : ''}`} data-gap="xs">
+                                  <button
+                                    type="button"
+                                    className="mw-dsh-btn"
+                                    data-size="sm"
+                                    data-variant="ghost"
+                                    data-cut-move-up={row.shotRef}
+                                    disabled={cutBusy || rowIdx === 0}
+                                    onClick={() => void handleMoveShot(row.shotRef, -1)}
+                                  >
+                                    ↑
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="mw-dsh-btn"
+                                    data-size="sm"
+                                    data-variant="ghost"
+                                    data-cut-move-down={row.shotRef}
+                                    disabled={cutBusy || rowIdx === rows.length - 1}
+                                    onClick={() => void handleMoveShot(row.shotRef, 1)}
+                                  >
+                                    ↓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="mw-dsh-btn"
+                                    data-size="sm"
+                                    data-variant="ghost"
+                                    data-cut-toggle-omit={row.shotRef}
+                                    disabled={cutBusy}
+                                    onClick={() => void handleToggleOmitShot(row.shotRef)}
+                                  >
+                                    {isOmitted ? t('cutRestore') : t('cutOmit')}
+                                  </button>
+                                  {isOmitted ? <span className="mw-chip">{t('cutOmittedBadge')}</span> : null}
                                 </div>
                               </MediaCard>
                             )
@@ -1134,8 +1509,9 @@ export function DramaMainPage({
               rpc={rpc}
               editTimelines={editTimelines}
               details={details}
-              shotRows={shotRows}
+              shotRows={activeCutRows}
               reviewsByShot={reviewsByShot}
+              episodeRef={selectedEpisode !== 'all' ? selectedEpisode : activeCutEpisode}
               onInspectShot={setSelectedShotRef}
               onNotice={setNotice}
               t={t}
