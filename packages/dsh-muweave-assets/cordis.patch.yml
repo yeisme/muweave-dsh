@@ -1,0 +1,4 @@
+- insert:
+    - id: muweave-assets
+      name: '@yeisme/dsh-muweave-assets'
+      config: {}

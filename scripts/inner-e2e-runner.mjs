@@ -103,7 +103,7 @@ try {
     stdio: 'pipe',
   })
 
-  // 2. Install all 6 packed .tgz plugins completely offline
+  // 2. Install all 10 packed .tgz plugins completely offline
   const tgzNames = [
     'yeisme-dsh-muweave-workbench-0.1.0.tgz',
     'yeisme-dsh-muweave-eikona-0.1.0.tgz',
@@ -111,6 +111,10 @@ try {
     'yeisme-dsh-muweave-drama-0.1.0.tgz',
     'yeisme-dsh-muweave-kit-0.1.0.tgz',
     'yeisme-dsh-muweave-schedule-0.1.0.tgz',
+    'yeisme-dsh-muweave-canvas-0.1.0.tgz',
+    'yeisme-dsh-muweave-stage3d-0.1.0.tgz',
+    'yeisme-dsh-muweave-audio-0.1.0.tgz',
+    'yeisme-dsh-muweave-assets-0.1.0.tgz',
   ]
   for (const tgz of tgzNames) {
     execFileSync(
@@ -438,11 +442,21 @@ try {
   ]
   const switcher = page.locator('[data-muweave-room-switcher="true"]')
   const roomNav = page.locator('[data-muweave-room-nav="true"]')
-  // Wide theater: rooms are a glass pill nav (editorial v2); the menu stays for narrow widths and keyboard users.
+  // Wide theater: pinned rooms live in the glass pill nav; unpinned/overflow rooms live in the switcher menu.
   async function enterRoom(room, via = 'nav') {
+    let usedNav = false
     if (via === 'nav') {
       await roomNav.waitFor({ state: 'visible', timeout: 5_000 })
-      await roomNav.locator(`[data-room-id="${room.id}"]`).click()
+      const navPill = roomNav.locator(`[data-room-id="${room.id}"]`)
+      if ((await navPill.count()) > 0 && (await navPill.isVisible())) {
+        await navPill.click()
+        usedNav = true
+      } else {
+        await switcher.click()
+        const menu = page.getByRole('menu')
+        await menu.waitFor({ state: 'visible', timeout: 5_000 })
+        await menu.locator(`[role="menuitemradio"][data-room-id="${room.id}"]`).click()
+      }
     } else {
       await switcher.click()
       const menu = page.getByRole('menu')
@@ -450,7 +464,7 @@ try {
       await menu.locator(`[role="menuitemradio"][data-room-id="${room.id}"]`).click()
     }
     await page.locator(`[data-muweave-theater="${room.id}"]`).waitFor({ state: 'attached', timeout: 10_000 })
-    if (via === 'nav') {
+    if (usedNav) {
       const current = await roomNav.locator('[aria-current="page"]').getAttribute('data-room-id', { timeout: 5_000 })
       if (current !== room.id) throw new Error(`Room nav marks ${current} current after entering ${room.id}`)
     }
@@ -471,9 +485,9 @@ try {
       await switcher.click()
       await page.getByRole('menu').waitFor({ state: 'visible', timeout: 5_000 })
       const items = await page.getByRole('menuitemradio').count()
-      // The five original rooms plus the 成稿 room added by creator platform v1.
-      if (items !== roomExpectations.length + 1) {
-        throw new Error(`Room switcher lists ${items} rooms, expected ${roomExpectations.length + 1}`)
+      // Core + Studio + Ops rooms (v9 registers up to 12 rooms including muweave-draft & muweave-modules).
+      if (items < roomExpectations.length + 1) {
+        throw new Error(`Room switcher lists ${items} rooms, expected at least ${roomExpectations.length + 1}`)
       }
       if ((await page.locator('[role="menuitemradio"][data-room-id="muweave-draft"]').count()) !== 1) {
         throw new Error('Room switcher is missing the 成稿 room')
@@ -623,11 +637,47 @@ try {
     process.stdout.write(`Verified theater room [${room.name}] rendered .muweave/ elements.\n`)
   }
 
+  // v9 Modular Studio rooms: modules, canvas, stage3d, audio, assets at 1440x900
+  async function enterRoomViaMenu(roomId) {
+    if (roomId === 'muweave-modules') {
+      const modBtn = page.locator('[data-muweave-module-manager-btn="true"]').first()
+      await modBtn.waitFor({ state: 'visible', timeout: 5_000 })
+      await modBtn.click()
+      await page.locator('[data-muweave-module-manager="true"]').waitFor({ state: 'visible', timeout: 10_000 })
+      await page.waitForTimeout(300)
+      return
+    }
+    await switcher.click()
+    const menu = page.getByRole('menu')
+    await menu.waitFor({ state: 'visible', timeout: 5_000 })
+    await menu.locator(`[role="menuitemradio"][data-room-id="${roomId}"]`).click()
+    await page.locator(`[data-muweave-theater="${roomId}"]`).waitFor({ state: 'attached', timeout: 10_000 })
+    await page.waitForTimeout(300)
+  }
+
+  for (const v9Room of [
+    { id: 'muweave-modules', file: 'modules-1440x900.png' },
+    { id: 'muweave-canvas', file: 'canvas-1440x900.png', autoLayout: true },
+    { id: 'muweave-stage3d', file: 'stage3d-1440x900.png' },
+    { id: 'muweave-audio', file: 'audio-1440x900.png' },
+    { id: 'muweave-assets', file: 'assets-1440x900.png' },
+  ]) {
+    await enterRoomViaMenu(v9Room.id)
+    if (v9Room.autoLayout) {
+      const autoBtn = page.locator('[data-canvas-autolayout="true"]').first()
+      if ((await autoBtn.count()) > 0 && (await autoBtn.isVisible())) {
+        await autoBtn.click()
+        await page.waitForTimeout(300)
+      }
+    }
+    await page.screenshot({ path: path.join(artifactsDir, v9Room.file) })
+    process.stdout.write(`Verified v9 modular studio room [${v9Room.id}] and captured ${v9Room.file}.\n`)
+  }
+
   // Creator platform v1: 成稿 room -> 为此镜出图 -> estimate -> submit -> approve -> slots -> accept -> shot image.
   // (Paid-disabled approve gating is covered by tests/capabilities.test.ts and tests/generation-ui.test.tsx.)
   const draftRoomId = 'muweave-draft'
-  await roomNav.locator(`[data-room-id="${draftRoomId}"]`).click()
-  await page.locator(`[data-muweave-theater="${draftRoomId}"]`).waitFor({ state: 'attached', timeout: 10_000 })
+  await enterRoomViaMenu(draftRoomId)
   await page.locator('[data-muweave-draft="true"]').waitFor({ state: 'visible', timeout: 10_000 })
   const shotRef = 'shot:ep01:s01:01'
   const genBtn = page.locator(`[data-muweave-shot-generate="${shotRef}"]`)
@@ -721,11 +771,15 @@ try {
   await chip.waitFor({ state: 'detached', timeout: 10_000 })
   process.stdout.write(`Verified schedule room: planned "${chipText}" onto a day and cleared it again.\n`)
 
-  // Alt+2 switches straight to the second room (Eikona).
+  // Alt+2 switches straight to the second visible header room in the active modular preset.
+  const secondNavRoomId = await roomNav.locator('[data-room-id]').nth(1).getAttribute('data-room-id')
   await page.locator('[data-muweave-workspace-root="true"]').first().click({ position: { x: 4, y: 4 } })
   await page.keyboard.press('Alt+Digit2')
-  await page.locator('[data-muweave-theater="muweave-eikona"]').waitFor({ state: 'attached', timeout: 5_000 })
-  process.stdout.write('Verified Alt+N room shortcut.\n')
+  await page.locator(`[data-muweave-theater="${secondNavRoomId ?? 'muweave-eikona'}"]`).waitFor({ state: 'attached', timeout: 5_000 })
+  process.stdout.write(`Verified Alt+N room shortcut (Alt+2 -> ${secondNavRoomId}).\n`)
+  if (secondNavRoomId !== 'muweave-eikona') {
+    await enterRoom(roomExpectations.find((r) => r.id === 'muweave-eikona'), 'nav')
+  }
 
   // In the Eikona room, verify Range CAS image loaded (`naturalWidth > 0`) and 3-state Floating Agent
   await page.getByText('art_linwu_front').first().waitFor({ state: 'visible' })

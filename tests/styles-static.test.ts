@@ -8,7 +8,19 @@ import { MUWEAVE_CORE_CSS } from '../packages/dsh-muweave-core/src/client/styles
 // monochrome actions (no dusk violet), glass only behind @supports, no ad-hoc inline styles.
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const PACKAGES = ['dsh-muweave-core', 'dsh-muweave-workbench', 'dsh-muweave-eikona', 'dsh-muweave-script', 'dsh-muweave-drama', 'dsh-muweave-kit']
+const PACKAGES = [
+  'dsh-muweave-core',
+  'dsh-muweave-workbench',
+  'dsh-muweave-eikona',
+  'dsh-muweave-script',
+  'dsh-muweave-drama',
+  'dsh-muweave-kit',
+  'dsh-muweave-schedule',
+  'dsh-muweave-canvas',
+  'dsh-muweave-stage3d',
+  'dsh-muweave-audio',
+  'dsh-muweave-assets',
+]
 
 function listTsx(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -73,7 +85,7 @@ describe('visual static guard (polish v1 + editorial v2)', () => {
         const bare = body.replace(/\}$/, '').trim().match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+CSSProperties)?$/)
         const allowed =
           /^\{ ?'--(mw|dr)-[a-z-]+':/.test(body) ||
-          /^\{\s*gridTemplateColumns\s*\}/.test(body) ||
+          /^\{\s*gridTemplateColumns\b/.test(body) ||
           /^position\b/.test(body) ||
           (bare !== null && motionBindings.has(bare[1]!)) ||
           /^\s*$/.test(body)

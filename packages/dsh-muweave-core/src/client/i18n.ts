@@ -93,6 +93,21 @@ export const zhDict = {
   axisFreeze: '冻结',
   axisAcceptance: '验收',
   axisUsability: '可用',
+  modulesNavButton: '模块',
+  modulesSwitcherFooter: '模块台 · 定制顶栏',
+  modulesTitle: '工作台模块定制',
+  modulesSubtitle: '按创作角色快速切换顶栏预设，固定或排序常用专业模块。',
+  modulesPresetsLabel: '角色预设',
+  modulesReset: '恢复默认',
+  modulesPreviewLabel: '当前顶栏预览',
+  modulesGroupPipeline: '核心流水线',
+  modulesGroupStudio: '专业制作台',
+  modulesGroupOps: '工具与排期',
+  modulesPin: '固定到顶栏',
+  modulesUnpin: '取消固定',
+  modulesMoveUp: '前移',
+  modulesMoveDown: '后移',
+  modulesOpen: '打开',
 } as const
 
 export type MuweaveDictKey = keyof typeof zhDict
@@ -182,6 +197,21 @@ export const enDict: Record<MuweaveDictKey, string> = {
   axisFreeze: 'Freeze',
   axisAcceptance: 'Acceptance',
   axisUsability: 'Usability',
+  modulesNavButton: 'Modules',
+  modulesSwitcherFooter: 'Modules · Customize Bar',
+  modulesTitle: 'Workspace Module Manager',
+  modulesSubtitle: 'Switch header presets by creator role, or pin and reorder studio rooms.',
+  modulesPresetsLabel: 'Role Presets',
+  modulesReset: 'Reset defaults',
+  modulesPreviewLabel: 'Active header preview',
+  modulesGroupPipeline: 'Core Pipeline',
+  modulesGroupStudio: 'Production Studio',
+  modulesGroupOps: 'Tools & Ops',
+  modulesPin: 'Pin to header',
+  modulesUnpin: 'Unpin',
+  modulesMoveUp: 'Move earlier',
+  modulesMoveDown: 'Move later',
+  modulesOpen: 'Open',
 }
 
 export const MUWEAVE_DICTIONARIES = { zh: { ...zhDict }, en: { ...enDict } }

@@ -1,0 +1,4 @@
+- insert:
+    - id: muweave-canvas
+      name: '@yeisme/dsh-muweave-canvas'
+      config: {}

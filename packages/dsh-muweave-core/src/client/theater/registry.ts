@@ -1,4 +1,5 @@
 import { createContext, useSyncExternalStore, type ComponentType, type Context, type ReactNode } from 'react'
+import type { TheaterRoomGroup } from '../../protocol'
 
 /**
  * Cross-bundle theater state. Every MuWeave plugin bundles its own copy of core, so the room
@@ -13,10 +14,13 @@ import { createContext, useSyncExternalStore, type ComponentType, type Context, 
 export const THEATER_PANEL_ID = 'muweave-theater'
 export const THEATER_COMPANION_ID = 'muweave-theater/companion'
 export const THEATER_ROOM_STORAGE_KEY = 'muweave.theater.room'
+export const THEATER_MODULES_VIEW_ID = 'muweave-modules'
 
 export interface TheaterRoom {
   id: string
   order: number
+  /** Visual header group: core (pipeline) / studio / ops. */
+  group?: TheaterRoomGroup
   /** Short switcher name: 总览 / 视觉 / 剧本 / 分镜生产 / 工具箱. */
   title: () => string
   /** One line under the name in the switcher menu (the old page title). */
@@ -132,9 +136,10 @@ export function registerTheaterRoom(room: TheaterRoom): () => void {
   }
 }
 
-/** The room to show: the chosen one if it is still registered, else the first room. */
+/** The room to show: the chosen one if it is still registered (or built-in modules view), else the first room. */
 export function getActiveTheaterRoomId(): string | null {
   const h = holder()
+  if (h.activeRoomId === THEATER_MODULES_VIEW_ID) return THEATER_MODULES_VIEW_ID
   if (h.activeRoomId && h.rooms.has(h.activeRoomId)) return h.activeRoomId
   return h.roomsSnapshot[0]?.id ?? null
 }

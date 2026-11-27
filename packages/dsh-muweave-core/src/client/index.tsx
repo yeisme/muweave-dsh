@@ -1,4 +1,6 @@
 import type { ComponentType } from 'react'
+import type { TheaterRoomGroup } from '../protocol'
+import { inferTheaterRoomGroup } from './theater/module-manager'
 import {
   FloatingAgentOverlay,
   getFloatingAgentSnapshot,
@@ -114,6 +116,7 @@ export interface DshClientContextLike {
 export interface ExtraTheaterRoomSpec {
   panelId: string
   order: number
+  group?: TheaterRoomGroup
   title: () => string
   roomTitle?: () => string
   domains?: readonly string[]
@@ -127,6 +130,7 @@ export interface RegisterCreatorPluginOptions {
   pluginNamespace: string
   dictionaries: { zh: Record<string, string>; en: Record<string, string> }
   pane: CreatorPaneSpec
+  group?: TheaterRoomGroup
   MainComponent: ComponentType<{ rpc: MuweaveRpcClient; t: (key: string) => string; coreT: MuweaveTranslator }>
   CompanionComponent: ComponentType<{ rpc: MuweaveRpcClient; t: (key: string) => string; coreT: MuweaveTranslator }>
   rpc?: MuweaveRpcClient
@@ -265,6 +269,7 @@ export function registerMuweaveCreatorPlugin(
       registerTheaterRoom({
         id: pane.panelId,
         order: pane.order,
+        group: options.group ?? inferTheaterRoomGroup(pane.panelId),
         title: pane.roomTitle ?? pane.title,
         description: pane.title,
         icon: pane.icon,
@@ -284,6 +289,7 @@ export function registerMuweaveCreatorPlugin(
         registerTheaterRoom({
           id: extra.panelId,
           order: extra.order,
+          group: extra.group ?? inferTheaterRoomGroup(extra.panelId),
           title: extra.roomTitle ?? extra.title,
           description: extra.title,
           icon: extra.icon,
@@ -567,6 +573,7 @@ export {
 } from './session-log'
 export {
   THEATER_COMPANION_ID,
+  THEATER_MODULES_VIEW_ID,
   THEATER_PANEL_ID,
   THEATER_ROOM_STORAGE_KEY,
   getActiveTheaterRoomId,
@@ -581,6 +588,24 @@ export {
   type TheaterRoomBadge,
   type TheaterRoomBadgeTone,
 } from './theater/registry'
+export {
+  MODULE_PRESETS,
+  THEATER_TABS_STORAGE_KEY,
+  applyModulePreset,
+  getModuleLayoutState,
+  groupHeaderRooms,
+  inferTheaterRoomGroup,
+  moveModuleOrder,
+  resetModuleLayout,
+  resolveVisibleHeaderRooms,
+  subscribeModuleLayout,
+  syncModuleLayoutFromRpc,
+  togglePinModule,
+  useModuleLayoutState,
+  type ModuleLayoutState,
+  type ModulePresetDef,
+} from './theater/module-manager'
+export { ModuleManagerPage } from './theater/ModuleManagerPage'
 export { ShortcutsHelpModal, type ShortcutsHelpModalProps } from './shortcuts-modal'
 export { RoomNav, RoomSwitcher, TheaterPage } from './theater/TheaterPage'
 export {

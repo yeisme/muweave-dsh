@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import type { MuweaveTranslator } from '../i18n'
+import { getSharedMuweaveRpcClient } from '../rpc-client'
 import { EmptyState, Icon } from '../ui'
 import { ShortcutsHelpModal } from '../shortcuts-modal'
 import {
+  getModuleLayoutState,
+  groupHeaderRooms,
+  resolveVisibleHeaderRooms,
+  syncModuleLayoutFromRpc,
+  useModuleLayoutState,
+} from './module-manager'
+import { ModuleManagerPage } from './ModuleManagerPage'
+import {
+  THEATER_MODULES_VIEW_ID,
   getActiveTheaterRoomId,
   getTheaterRooms,
   setActiveTheaterRoom,
@@ -161,6 +171,26 @@ export function RoomSwitcher({
               </button>
             )
           })}
+          <div className="mw-room-menu-foot">
+            <button
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className="mw-room-item"
+              data-room-id={THEATER_MODULES_VIEW_ID}
+              onClick={() => {
+                onSelect(THEATER_MODULES_VIEW_ID)
+                close(true)
+              }}
+            >
+              <span className="mw-room-icon" aria-hidden="true">
+                <Icon name="sliders" />
+              </span>
+              <span className="mw-room-item-text">
+                <span className="mw-room-item-name">{t('modulesSwitcherFooter')}</span>
+              </span>
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
@@ -168,8 +198,7 @@ export function RoomSwitcher({
 }
 
 /**
- * Glass pill navigation: every room is one pill, the current room is ink-filled. Shown on wide
- * stages; a container query hides it on narrow ones, where the menu switcher remains.
+ * Glass pill navigation: visible header rooms grouped by pipeline / studio / ops, plus Modules button.
  */
 export function RoomNav({
   t,
@@ -183,30 +212,55 @@ export function RoomNav({
   onSelect: (roomId: string) => void
 }) {
   const badges = useTheaterRoomBadges()
+  const layout = useModuleLayoutState()
+  const visible = resolveVisibleHeaderRooms(rooms, layout, activeId)
+  const groups = groupHeaderRooms(visible)
+  let slotIdx = 0
+
   return (
     <nav className="mw-room-nav" aria-label={t('theaterRoomsNav')} data-muweave-room-nav="true">
-      {rooms.map((room, i) => {
-        const current = room.id === activeId
-        const badge = badges[room.id]
-        return (
-          <button
-            key={room.id}
-            type="button"
-            className="mw-room-nav-btn"
-            data-room-id={room.id}
-            aria-current={current ? 'page' : undefined}
-            title={i < 9 ? `${room.description()} · Alt+${i + 1}` : room.description()}
-            onClick={() => onSelect(room.id)}
-          >
-            <span>{room.title()}</span>
-            {badge && badge.count > 0 ? (
-              <span className="mw-room-badge" data-room-badge={room.id} data-tone={badge.tone ?? 'info'}>
-                {badge.count}
-              </span>
-            ) : null}
-          </button>
-        )
-      })}
+      {groups.map((grp, gi) => (
+        <span key={grp.group} className="mw-row" data-gap="xs">
+          {gi > 0 ? <span className="mw-room-nav-sep" aria-hidden="true" /> : null}
+          {grp.rooms.map((room) => {
+            const idx = slotIdx
+            slotIdx += 1
+            const current = room.id === activeId
+            const badge = badges[room.id]
+            return (
+              <button
+                key={room.id}
+                type="button"
+                className="mw-room-nav-btn"
+                data-room-id={room.id}
+                aria-current={current ? 'page' : undefined}
+                title={idx < 9 ? `${room.description()} · Alt+${idx + 1}` : room.description()}
+                onClick={() => onSelect(room.id)}
+              >
+                <span>{room.title()}</span>
+                {badge && badge.count > 0 ? (
+                  <span className="mw-room-badge" data-room-badge={room.id} data-tone={badge.tone ?? 'info'}>
+                    {badge.count}
+                  </span>
+                ) : null}
+              </button>
+            )
+          })}
+        </span>
+      ))}
+      <span className="mw-room-nav-sep" aria-hidden="true" />
+      <button
+        type="button"
+        className="mw-room-nav-btn mw-room-nav-manage"
+        data-muweave-module-manager-btn="true"
+        data-room-id={THEATER_MODULES_VIEW_ID}
+        aria-current={activeId === THEATER_MODULES_VIEW_ID ? 'page' : undefined}
+        title={t('modulesSwitcherFooter')}
+        onClick={() => onSelect(THEATER_MODULES_VIEW_ID)}
+      >
+        <Icon name="sliders" />
+        <span>{t('modulesNavButton')}</span>
+      </button>
     </nav>
   )
 }
@@ -220,6 +274,10 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
   const activeId = useActiveTheaterRoomId()
   const Chrome = theaterChromeContext()
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+
+  useEffect(() => {
+    void syncModuleLayoutFromRpc(getSharedMuweaveRpcClient())
+  }, [])
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -242,7 +300,12 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
       const m = /^Digit([1-9])$/.exec(e.code)
       if (!m) return
-      const room = getTheaterRooms()[Number(m[1]) - 1]
+      const visible = resolveVisibleHeaderRooms(
+        getTheaterRooms(),
+        getModuleLayoutState(),
+        getActiveTheaterRoomId(),
+      )
+      const room = visible[Number(m[1]) - 1]
       if (!room) return
       e.preventDefault()
       setActiveTheaterRoom(room.id)
@@ -251,8 +314,9 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const active = rooms.find((r) => r.id === activeId)
-  if (!active) {
+  const isModulesView = activeId === THEATER_MODULES_VIEW_ID
+  const active = isModulesView ? undefined : rooms.find((r) => r.id === activeId)
+  if (!isModulesView && !active) {
     return (
       <div className="mw-dsh-root" data-muweave-theater="empty">
         <EmptyState icon="theater">{t('theaterNoRooms')}</EmptyState>
@@ -260,12 +324,13 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
     )
   }
 
+  const currentId = isModulesView ? THEATER_MODULES_VIEW_ID : active!.id
   const isEn = t('langCode') === 'en'
   const shortcutsLabel = isEn ? 'Keyboard shortcuts (?)' : '快捷键总览 (?)'
   const switcher = (
     <>
-      <RoomSwitcher t={t} rooms={rooms} activeId={active.id} onSelect={setActiveTheaterRoom} />
-      <RoomNav t={t} rooms={rooms} activeId={active.id} onSelect={setActiveTheaterRoom} />
+      <RoomSwitcher t={t} rooms={rooms} activeId={currentId} onSelect={setActiveTheaterRoom} />
+      <RoomNav t={t} rooms={rooms} activeId={currentId} onSelect={setActiveTheaterRoom} />
     </>
   )
   const trailing = (
@@ -294,11 +359,31 @@ export function TheaterPage({ t, onBackToChat }: { t: MuweaveTranslator; onBackT
       </button>
     </span>
   )
-  const Main = active.Main
+
+  if (isModulesView) {
+    return (
+      <Chrome.Provider value={{ switcher, trailing }}>
+        <div className="mw-theater" data-muweave-theater={THEATER_MODULES_VIEW_ID}>
+          <div className="mw-dsh-root" data-muweave-workspace-root="true">
+            <header className="mw-dsh-topbar">
+              <div className="mw-dsh-title-group" data-theater="true">
+                {switcher}
+              </div>
+              <div className="mw-dsh-toolbar">{trailing}</div>
+            </header>
+            <ModuleManagerPage t={t} rooms={rooms} rpc={getSharedMuweaveRpcClient()} />
+          </div>
+        </div>
+        <ShortcutsHelpModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} t={t} />
+      </Chrome.Provider>
+    )
+  }
+
+  const Main = active!.Main
   return (
     <Chrome.Provider value={{ switcher, trailing }}>
-      <div className="mw-theater" data-muweave-theater={active.id}>
-        <Main key={active.id} />
+      <div className="mw-theater" data-muweave-theater={active!.id}>
+        <Main key={active!.id} />
       </div>
       <ShortcutsHelpModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} t={t} />
     </Chrome.Provider>

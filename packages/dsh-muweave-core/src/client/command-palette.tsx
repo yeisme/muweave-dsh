@@ -22,15 +22,20 @@ export interface CommandPaletteItem {
   run: () => void
 }
 
-/** All 7 canonical theater rooms reachable via quick-jump commands in the command palette. */
+/** All 12 canonical theater rooms (including studio tabs & module manager) reachable via quick-jump commands. */
 export const THEATER_QUICK_ROOMS: ReadonlyArray<{ id: string; zh: string; en: string }> = [
   { id: 'muweave-workbench', zh: '总览', en: 'Overview' },
   { id: 'muweave-eikona', zh: '视觉', en: 'Visual' },
   { id: 'muweave-script', zh: '剧本', en: 'Script' },
   { id: 'muweave-drama', zh: '分镜生产', en: 'Production' },
   { id: 'muweave-draft', zh: '成稿', en: 'Draft' },
+  { id: 'muweave-canvas', zh: '画布', en: 'Canvas' },
+  { id: 'muweave-stage3d', zh: '3D导演台', en: '3D Stage' },
+  { id: 'muweave-audio', zh: '音画台', en: 'Audio' },
+  { id: 'muweave-assets', zh: '资产库', en: 'Assets' },
   { id: 'muweave-kit', zh: '工具箱', en: 'Toolbox' },
   { id: 'muweave-schedule', zh: '排期', en: 'Schedule' },
+  { id: 'muweave-modules', zh: '模块台', en: 'Modules' },
 ]
 
 /** Case-insensitive subsequence match so "总览" and "zlan" both reach 总览. */
