@@ -5,10 +5,14 @@
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
+  "bin": {
+    "muweave": "./lib/cli.js"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./protocol": "./lib/protocol.js",
+    "./mcp": "./lib/mcp.js",
     "./package.json": "./package.json"
   },
   "files": [

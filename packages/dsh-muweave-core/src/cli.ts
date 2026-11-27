@@ -1,0 +1,503 @@
+#!/usr/bin/env node
+import { readFile, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { renderAgentOutput, stripHostPaths } from '@yeisme/muweave-bundle'
+import { runCapabilityDoctor } from './capabilities/doctor'
+import type { CapabilityCatalogV1 } from './capability-protocol'
+import { DemoSeedError, seedDemoWorkspace } from './demo-seed'
+import { createLocalMcpBridge, createMuweaveMcpServer, createRemoteMcpBridge, runStdioMcpServer } from './mcp/server'
+import { startMuweaveMcpHttpServer } from './mcp/http'
+import type {
+  DramaExportResultV1,
+  ProjectMigrationReportV1,
+  ShotReviewBatchResultV1,
+  ShotReviewRecordV1,
+  WorkspaceSummaryView,
+} from './protocol'
+
+interface ParsedArgs {
+  positional: string[]
+  flags: Record<string, string | boolean>
+}
+
+const BOOLEAN_FLAGS = new Set(['json', 'agent', 'force', 'help', 'h', 'capabilities'])
+
+function parseArgv(argv: readonly string[]): ParsedArgs {
+  const positional: string[] = []
+  const flags: Record<string, string | boolean> = {}
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!
+    if (arg === '-h') {
+      flags.help = true
+      continue
+    }
+    if (arg.startsWith('--')) {
+      const eq = arg.indexOf('=')
+      if (eq !== -1) {
+        flags[arg.slice(2, eq)] = arg.slice(eq + 1)
+      } else {
+        const key = arg.slice(2)
+        const next = argv[i + 1]
+        if (!BOOLEAN_FLAGS.has(key) && next !== undefined && !next.startsWith('--')) {
+          flags[key] = next
+          i += 1
+        } else {
+          flags[key] = true
+        }
+      }
+    } else {
+      positional.push(arg)
+    }
+  }
+  return { positional, flags }
+}
+
+function strFlag(flags: Record<string, string | boolean>, key: string): string | undefined {
+  const v = flags[key]
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+
+function numFlag(flags: Record<string, string | boolean>, key: string): number | undefined {
+  const raw = strFlag(flags, key)
+  if (raw === undefined) return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : undefined
+}
+
+const HELP_TEXT = `muweave — MuWeave DSH Creator CLI & MCP Server
+
+Usage:
+  muweave status [--workspace <dir>] [--json | --agent]
+  muweave shots list [--scene <ref>] [--status <status>] [--missing <role>]
+  muweave review set <shotRef> --status <status> [--note <text>] [--tags a,b] [--expected-revision <n>]
+  muweave review batch (--file <path> | --items <json>)
+  muweave export <cut_manifest_v1|cmx3600_edl|shotlist_csv> [--fps 24|25|30] [--aspect 9:16] [--out <file>]
+  muweave schedule list
+  muweave schedule plan <ref> <YYYY-MM-DD> [--label <text>] [--kind <kind>] [--note <text>] [--project <id>]
+  muweave schedule clear <ref>
+  muweave diagnose [--project <id>]
+  muweave migrate report
+  muweave doctor --capabilities [--json | --agent]
+  muweave bots list
+  muweave bots pause <botId> [--expected-revision <n>]
+  muweave bots resume <botId> [--expected-revision <n>]
+  muweave tasks list
+  muweave tasks trace <taskId>
+  muweave tasks cancel <taskId>
+  muweave demo [seed] [--force]
+  muweave mcp [--transport stdio|http] [--host 127.0.0.1] [--port 3741] [--auth-token <tok>] [--host-url <url>]
+
+Global flags:
+  --workspace <dir>   Target workspace directory (defaults to cwd)
+  --data-dir <dir>    Plugin data directory (defaults to ~/.dsh/plugin-data/muweave-dsh)
+  --host-url <url>    Proxy RPC requests to a running DSH host instead of local direct mode
+  --auth-token <tok>  Bearer token for remote HTTP MCP server or remote host proxy
+  --json              Emit sanitized JSON output
+  --agent             Emit AI-native spec_version=1.0 key=value output
+`
+
+export interface RunMuweaveCliIo {
+  stdout?: (chunk: string) => void
+  stderr?: (chunk: string) => void
+}
+
+export async function runMuweaveCli(
+  argv: readonly string[],
+  io: RunMuweaveCliIo = {},
+): Promise<number> {
+  const stdout = io.stdout ?? ((s) => process.stdout.write(s))
+  const stderr = io.stderr ?? ((s) => process.stderr.write(s))
+  const { positional, flags } = parseArgv(argv)
+  const asJson = flags.json === true
+  const asAgent = flags.agent === true
+
+  const emit = (command: string, payload: Record<string, unknown>, humanText: string, ok = true): number => {
+    const safePayload = stripHostPaths(payload)
+    if (asAgent) {
+      stdout(renderAgentOutput({ ok, ...safePayload }, command))
+    } else if (asJson) {
+      stdout(`${JSON.stringify({ ok, command, ...safePayload }, null, 2)}\n`)
+    } else {
+      stdout(humanText.endsWith('\n') ? humanText : `${humanText}\n`)
+    }
+    return ok ? 0 : 1
+  }
+
+  const emitError = (command: string, code: string, message: string): number => {
+    const safeMsg = stripHostPaths(message)
+    if (asAgent) {
+      stdout(renderAgentOutput({ ok: false, error: { code, message: safeMsg } }, command))
+    } else if (asJson) {
+      stdout(`${JSON.stringify({ ok: false, command, error: { code, message: safeMsg } }, null, 2)}\n`)
+    } else {
+      stderr(`[${code}] ${safeMsg}\n`)
+    }
+    return 1
+  }
+
+  if (flags.help === true || positional.length === 0 || positional[0] === 'help') {
+    stdout(HELP_TEXT)
+    return 0
+  }
+
+  const cmd = positional[0]!
+  const sub = positional[1]
+  const workspaceDir = path.resolve(strFlag(flags, 'workspace') ?? process.cwd())
+  const pluginDataDir = strFlag(flags, 'data-dir') ? path.resolve(strFlag(flags, 'data-dir')!) : undefined
+  const hostUrl = strFlag(flags, 'host-url')
+  const authToken = strFlag(flags, 'auth-token')
+
+  // 1. Demo workspace seed
+  if (cmd === 'demo') {
+    if (sub && sub !== 'seed') {
+      return emitError('demo', 'muweave/unknown_subcommand', `Unknown demo subcommand: ${sub}`)
+    }
+    try {
+      const result = await seedDemoWorkspace(workspaceDir, {
+        force: flags.force === true,
+        pluginDataDir,
+      })
+      return emit(
+        'demo.seed',
+        result as unknown as Record<string, unknown>,
+        `Demo workspace ready: ${result.title} (${result.projectId}) — ${result.elementCount} elements, ${result.shotCount} shots, ${result.reviewCount} reviews, ${result.scheduleCount} scheduled.`,
+      )
+    } catch (err) {
+      if (err instanceof DemoSeedError) return emitError('demo.seed', err.code, err.message)
+      return emitError('demo.seed', 'muweave/demo_seed_failed', err instanceof Error ? err.message : 'Demo seed failed')
+    }
+  }
+
+  // 2. MCP Server transport
+  if (cmd === 'mcp') {
+    const transport = (strFlag(flags, 'transport') ?? 'stdio').toLowerCase()
+    const mcpServer = createMuweaveMcpServer({
+      defaultWorkspaceDir: workspaceDir,
+      pluginDataDir,
+      hostUrl,
+      authToken,
+    })
+    if (transport === 'stdio') {
+      await runStdioMcpServer(mcpServer)
+      mcpServer.dispose()
+      return 0
+    }
+    if (transport === 'http') {
+      const host = strFlag(flags, 'host') ?? '127.0.0.1'
+      const port = numFlag(flags, 'port') ?? 3741
+      try {
+        const started = await startMuweaveMcpHttpServer({
+          server: mcpServer,
+          host,
+          port,
+          authToken,
+        })
+        stderr(`[muweave-dsh-mcp] Streamable HTTP listening on ${started.url}\n`)
+        await new Promise<void>((resolve) => {
+          const shutdown = () => {
+            void started.close().finally(() => {
+              mcpServer.dispose()
+              resolve()
+            })
+          }
+          process.once('SIGINT', shutdown)
+          process.once('SIGTERM', shutdown)
+        })
+        return 0
+      } catch (err) {
+        mcpServer.dispose()
+        const code = (err as { code?: string })?.code ?? 'MCP_HTTP_START_FAILED'
+        return emitError('mcp.http', code, err instanceof Error ? err.message : 'Failed to start MCP HTTP server')
+      }
+    }
+    mcpServer.dispose()
+    return emitError('mcp', 'muweave/invalid_transport', `Unsupported transport: ${transport} (use stdio or http)`)
+  }
+
+  // 3. RPC-backed commands
+  const bridge = hostUrl
+    ? createRemoteMcpBridge({ hostUrl, authToken })
+    : createLocalMcpBridge({ defaultWorkspaceDir: workspaceDir, pluginDataDir })
+
+  try {
+    if (cmd === 'status') {
+      const [wsRes, bundleRes] = await Promise.all([
+        bridge.call('workspace.list', {}),
+        bridge.call('bundle.status', {}),
+      ])
+      if (!bundleRes.ok) return emitError('status', bundleRes.error.code, bundleRes.error.message)
+      const data = bundleRes.data as {
+        initialized: boolean
+        workspace: { workspaceId: string; label: string; hasBundle: boolean }
+        index?: { projectId: string; title: string; revision: number; counts?: { total: number } }
+      }
+      const workspaces = wsRes.ok ? (wsRes.data as { workspaces: unknown[] }).workspaces : []
+      const human = data.initialized && data.index
+        ? `Workspace ${data.workspace.workspaceId} (${data.workspace.label}) — ${data.index.title} [${data.index.projectId}] rev ${data.index.revision}, ${data.index.counts?.total ?? 0} elements`
+        : `Workspace ${data.workspace.workspaceId} (${data.workspace.label}) — bundle not initialized (run "muweave demo seed" to try a sample project)`
+      return emit('status', { workspaceCount: workspaces.length, ...data }, human)
+    }
+
+    if (cmd === 'shots' && sub === 'list') {
+      const mcpServer = createMuweaveMcpServer({ bridge })
+      const rpcRes = await mcpServer.handleJsonRpc({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'muweave_drama_shots_list',
+          arguments: {
+            ...(strFlag(flags, 'scene') ? { sceneRef: strFlag(flags, 'scene') } : {}),
+            ...(strFlag(flags, 'status') ? { reviewStatus: strFlag(flags, 'status') } : {}),
+            ...(strFlag(flags, 'missing') ? { missingRole: strFlag(flags, 'missing') } : {}),
+          },
+        },
+      })
+      const text = ((rpcRes?.result as { content?: Array<{ text?: string }>; isError?: boolean })?.content?.[0]?.text) ?? '{}'
+      const parsed = JSON.parse(text) as { total?: number; shots?: Array<Record<string, unknown>>; error?: { code: string; message: string } }
+      if (parsed.error) return emitError('shots.list', parsed.error.code, parsed.error.message)
+      const shots = parsed.shots ?? []
+      const lines = shots.map(
+        (s) =>
+          `#${String(s.order).padStart(2, '0')} ${s.shotRef} (${s.sceneRef}) [${s.reviewStatus}] ${((Number(s.plannedDurationMicros ?? 0)) / 1_000_000).toFixed(1)}s roles=${(s.rolesPresent as string[]).join(',') || 'none'}`,
+      )
+      return emit(
+        'shots.list',
+        { total: shots.length, shots },
+        shots.length ? lines.join('\n') : 'No matching shots found.',
+      )
+    }
+
+    if (cmd === 'review' && sub === 'set') {
+      const shotRef = positional[2] ?? ''
+      const status = strFlag(flags, 'status') ?? ''
+      const tagsRaw = strFlag(flags, 'tags')
+      const expectedRevision = numFlag(flags, 'expected-revision')
+      const res = await bridge.call('drama.shot.review.set', {
+        shotRef,
+        status,
+        ...(strFlag(flags, 'scene') ? { sceneRef: strFlag(flags, 'scene') } : {}),
+        ...(strFlag(flags, 'note') !== undefined ? { note: strFlag(flags, 'note') } : {}),
+        ...(tagsRaw ? { tags: tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) } : {}),
+        ...(expectedRevision !== undefined ? { expectedRevision } : {}),
+      })
+      if (!res.ok) return emitError('review.set', res.error.code, res.error.message)
+      const review = (res.data as { review: ShotReviewRecordV1 }).review
+      return emit(
+        'review.set',
+        { review },
+        `Saved review for ${review.shotRef}: ${review.status} (rev ${review.revision})`,
+      )
+    }
+
+    if (cmd === 'review' && sub === 'batch') {
+      let rawItems: unknown
+      const fileFlag = strFlag(flags, 'file')
+      const itemsFlag = strFlag(flags, 'items')
+      if (fileFlag) {
+        rawItems = JSON.parse(await readFile(path.resolve(fileFlag), 'utf8'))
+      } else if (itemsFlag) {
+        rawItems = JSON.parse(itemsFlag)
+      } else {
+        return emitError('review.batch', 'muweave/missing_items', 'Provide --file <path> or --items <json>')
+      }
+      const items = Array.isArray(rawItems) ? rawItems : (rawItems as { items?: unknown }).items
+      const res = await bridge.call('drama.shot.review.batch', { items })
+      if (!res.ok) return emitError('review.batch', res.error.code, res.error.message)
+      const data = res.data as ShotReviewBatchResultV1
+      return emit(
+        'review.batch',
+        data as unknown as Record<string, unknown>,
+        `Batch review complete: ${data.succeededCount} succeeded, ${data.failedCount} failed.`,
+      )
+    }
+
+    if (cmd === 'export') {
+      const format = sub ?? 'cut_manifest_v1'
+      const fps = numFlag(flags, 'fps')
+      const aspectRatio = strFlag(flags, 'aspect')
+      const outPath = strFlag(flags, 'out')
+      const res = await bridge.call('drama.export.manifest', {
+        format,
+        ...(fps !== undefined ? { fps } : {}),
+        ...(aspectRatio ? { aspectRatio } : {}),
+      })
+      if (!res.ok) return emitError('export', res.error.code, res.error.message)
+      const result = res.data as DramaExportResultV1
+      if (outPath) {
+        await writeFile(path.resolve(outPath), result.content, 'utf8')
+        return emit(
+          'export',
+          {
+            format: result.format,
+            filename: result.filename,
+            shotCount: result.shotCount,
+            totalDurationMs: result.totalDurationMs,
+            fps: result.fps,
+            written: true,
+          },
+          `Exported ${result.format} (${result.shotCount} shots, ${(result.totalDurationMs / 1000).toFixed(1)}s) to ${path.basename(outPath)}`,
+        )
+      }
+      return emit('export', result as unknown as Record<string, unknown>, result.content)
+    }
+
+    if (cmd === 'schedule') {
+      if (!sub || sub === 'list') {
+        const res = await bridge.call('schedule.list', {})
+        if (!res.ok) return emitError('schedule.list', res.error.code, res.error.message)
+        const data = res.data as { entries: Array<{ date: string; ref: string; label: string }> }
+        const human = data.entries.length
+          ? data.entries.map((e) => `${e.date}  ${e.ref}  ${e.label}`).join('\n')
+          : 'Schedule board is empty.'
+        return emit('schedule.list', data as unknown as Record<string, unknown>, human)
+      }
+      if (sub === 'plan') {
+        const ref = positional[2] ?? ''
+        const date = positional[3] ?? ''
+        const res = await bridge.call('schedule.plan', {
+          ref,
+          date,
+          ...(strFlag(flags, 'label') ? { label: strFlag(flags, 'label') } : {}),
+          ...(strFlag(flags, 'kind') ? { kind: strFlag(flags, 'kind') } : {}),
+          ...(strFlag(flags, 'note') ? { note: strFlag(flags, 'note') } : {}),
+          ...(strFlag(flags, 'project') ? { projectId: strFlag(flags, 'project') } : {}),
+        })
+        if (!res.ok) return emitError('schedule.plan', res.error.code, res.error.message)
+        return emit('schedule.plan', res.data as Record<string, unknown>, `Planned ${ref} on ${date}`)
+      }
+      if (sub === 'clear') {
+        const ref = positional[2] ?? ''
+        const res = await bridge.call('schedule.clear', { ref })
+        if (!res.ok) return emitError('schedule.clear', res.error.code, res.error.message)
+        return emit('schedule.clear', res.data as Record<string, unknown>, `Cleared ${ref} from schedule board`)
+      }
+      return emitError('schedule', 'muweave/unknown_subcommand', `Unknown schedule subcommand: ${sub}`)
+    }
+
+    if (cmd === 'diagnose') {
+      const projectId = strFlag(flags, 'project')
+      const res = await bridge.call('project.diagnose', projectId ? { projectId } : {})
+      if (!res.ok) return emitError('diagnose', res.error.code, res.error.message)
+      const data = res.data as { reports: Array<{ projectId: string; title: string; state: string; findings: unknown[] }> }
+      const human = data.reports.length
+        ? data.reports.map((r) => `${r.projectId} (${r.title}): ${r.state} [${r.findings.length} finding(s)]`).join('\n')
+        : 'No projects registered.'
+      return emit('diagnose', data as unknown as Record<string, unknown>, human)
+    }
+
+    if (cmd === 'migrate' && sub === 'report') {
+      const res = await bridge.call('project.migration.report', {})
+      if (!res.ok) return emitError('migrate.report', res.error.code, res.error.message)
+      const rep = res.data as ProjectMigrationReportV1
+      const human = [
+        `Registry Migration Report (${rep.registrySchema}) — readyForV2=${rep.readyForV2}`,
+        `Projects: ${rep.projectCount} (${rep.archivedCount} archived) | Corrupt backups: ${rep.corruptBackupCount} | Legacy schedule: ${rep.legacyScheduleCount} | Unclaimed bundles: ${rep.unclaimedBundleCount}`,
+        ...rep.checks.map((c) => `  [${c.status.toUpperCase()}] ${c.label}: ${c.detail}`),
+      ].join('\n')
+      return emit('migrate.report', rep as unknown as Record<string, unknown>, human)
+    }
+
+    if (cmd === 'doctor') {
+      if (flags.capabilities !== true && sub !== 'capabilities') {
+        return emitError('doctor', 'muweave/missing_flag', 'Pass --capabilities to inspect capability readiness')
+      }
+      const [catRes, wsRes] = await Promise.all([
+        bridge.call('capability.catalog', {}),
+        bridge.call('bundle.status', {}),
+      ])
+      if (!catRes.ok) return emitError('doctor.capabilities', catRes.error.code, catRes.error.message)
+      const catalog = catRes.data as CapabilityCatalogV1
+      const wsSummary = wsRes.ok ? (wsRes.data as { workspace?: WorkspaceSummaryView }).workspace : undefined
+      const report = runCapabilityDoctor(catalog, wsSummary)
+      const human = [
+        `Capability Doctor — available=${report.availableCount}, blocked=${report.blockedCount}, paidEnabled=${report.paidEnabled}`,
+        ...report.capabilities.map(
+          (c) => `  [${c.available ? 'READY' : c.reason ?? 'BLOCKED'}] ${c.capabilityId} (${c.owner}/${c.stage}) — ${c.remediation}`,
+        ),
+      ].join('\n')
+      return emit('doctor.capabilities', report as unknown as Record<string, unknown>, human)
+    }
+
+    if (cmd === 'bots') {
+      if (!sub || sub === 'list') {
+        const res = await bridge.call('bot.roster', {})
+        if (!res.ok) return emitError('bots.list', res.error.code, res.error.message)
+        const data = res.data as { bots: Array<{ botId: string; role: string; state: string; revision: number }> }
+        const human = data.bots.length
+          ? data.bots.map((b) => `${b.botId} (${b.role}) [${b.state}] rev=${b.revision}`).join('\n')
+          : 'No bots registered.'
+        return emit('bots.list', data as unknown as Record<string, unknown>, human)
+      }
+      if (sub === 'pause' || sub === 'resume') {
+        const botId = positional[2] ?? ''
+        const expectedRevision = numFlag(flags, 'expected-revision')
+        const res = await bridge.call('bot.pause', {
+          botId,
+          paused: sub === 'pause',
+          ...(expectedRevision !== undefined ? { expectedRevision } : {}),
+        })
+        if (!res.ok) return emitError(`bots.${sub}`, res.error.code, res.error.message)
+        const bot = (res.data as { bot: { botId: string; state: string; revision: number } }).bot
+        return emit(`bots.${sub}`, res.data as Record<string, unknown>, `Bot ${bot.botId} is now ${bot.state} (rev ${bot.revision})`)
+      }
+      return emitError('bots', 'muweave/unknown_subcommand', `Unknown bots subcommand: ${sub}`)
+    }
+
+    if (cmd === 'tasks') {
+      if (!sub || sub === 'list') {
+        const res = await bridge.call('task.list', {})
+        if (!res.ok) return emitError('tasks.list', res.error.code, res.error.message)
+        const data = res.data as {
+          tasks: Array<{ taskId: string; status: string; goal: string }>
+          orphanedCount?: number
+        }
+        const human = data.tasks.length
+          ? [
+              `Tasks: ${data.tasks.length} (orphaned=${data.orphanedCount ?? 0})`,
+              ...data.tasks.map((t) => `  ${t.taskId} [${t.status}] ${t.goal}`),
+            ].join('\n')
+          : `No tasks recorded (orphaned=${data.orphanedCount ?? 0}).`
+        return emit('tasks.list', data as unknown as Record<string, unknown>, human)
+      }
+      if (sub === 'trace') {
+        const taskId = positional[2] ?? ''
+        const res = await bridge.call('task.trace', { taskId })
+        if (!res.ok) return emitError('tasks.trace', res.error.code, res.error.message)
+        const data = res.data as { task: { taskId: string; status: string }; jobs?: unknown[] }
+        return emit(
+          'tasks.trace',
+          data as unknown as Record<string, unknown>,
+          `Task ${data.task.taskId} [${data.task.status}] — ${(data.jobs ?? []).length} linked job(s)`,
+        )
+      }
+      if (sub === 'cancel') {
+        const taskId = positional[2] ?? ''
+        const res = await bridge.call('task.cancel', { taskId })
+        if (!res.ok) return emitError('tasks.cancel', res.error.code, res.error.message)
+        const data = res.data as { cancelledTaskIds: string[]; cancelledJobIds: string[] }
+        return emit(
+          'tasks.cancel',
+          data as unknown as Record<string, unknown>,
+          `Cancelled ${data.cancelledTaskIds.length} task(s) and ${data.cancelledJobIds.length} linked job(s).`,
+        )
+      }
+      return emitError('tasks', 'muweave/unknown_subcommand', `Unknown tasks subcommand: ${sub}`)
+    }
+
+    return emitError(cmd, 'muweave/unknown_command', `Unknown command: ${positional.join(' ')} (run "muweave --help")`)
+  } finally {
+    bridge.dispose?.()
+  }
+}
+
+const isDirectMain =
+  typeof process.argv[1] === 'string' &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
+
+if (isDirectMain) {
+  runMuweaveCli(process.argv.slice(2)).then((code) => {
+    process.exitCode = code
+  })
+}

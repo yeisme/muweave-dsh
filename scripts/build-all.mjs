@@ -1,5 +1,5 @@
 import { build } from 'esbuild'
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -73,10 +73,24 @@ async function buildBundlePackage() {
 async function buildCorePackage() {
   const outDir = path.join(pkgsDir, 'dsh-muweave-core/lib')
   await mkdir(outDir, { recursive: true })
+  const suppressNestedBundleCliAutoExec = {
+    name: 'suppress-nested-bundle-cli-auto-exec',
+    setup(b) {
+      b.onLoad({ filter: /packages[\\/]muweave-bundle[\\/]src[\\/]cli\.ts$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8')
+        return {
+          contents: src.replace(/if\s*\(\s*import\.meta\.url\s*===[\s\S]*$/, ''),
+          loader: 'ts',
+        }
+      })
+    },
+  }
   await build({
     entryPoints: {
       index: path.join(pkgsDir, 'dsh-muweave-core/src/index.ts'),
       protocol: path.join(pkgsDir, 'dsh-muweave-core/src/protocol.ts'),
+      cli: path.join(pkgsDir, 'dsh-muweave-core/src/cli.ts'),
+      mcp: path.join(pkgsDir, 'dsh-muweave-core/src/mcp/server.ts'),
     },
     outdir: outDir,
     bundle: true,
@@ -85,8 +99,10 @@ async function buildCorePackage() {
     target: 'node22',
     alias: aliasMap,
     external: NODE_EXTERNALS,
+    plugins: [suppressNestedBundleCliAutoExec],
     sourcemap: true,
   })
+  await chmod(path.join(outDir, 'cli.js'), 0o755)
   await build({
     entryPoints: {
       client: path.join(pkgsDir, 'dsh-muweave-core/src/client/index.tsx'),
