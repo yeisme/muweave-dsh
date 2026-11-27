@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import {
   CompanionList,
   EmptyAction,
-  EmptyState,
   Icon,
   IconButton,
   Masonry,
@@ -154,6 +153,15 @@ interface ShotMediaRow {
   linkedMedia?: LinkedMediaRef[]
 }
 
+function isGenerating(job: JobRecordV1): boolean {
+  return job.owner === 'eikona' && job.kind === 'image' && (job.status === 'queued' || job.status === 'running')
+}
+
+function progressFor(job: JobRecordV1): number | undefined {
+  if (job.slots.length === 0) return undefined
+  return (100 * job.slots.filter((slot) => slot.status === 'done' || slot.status === 'failed' || slot.status === 'skipped').length) / job.slots.length
+}
+
 async function loadShotMedia(rpc: MuweaveRpcClient): Promise<ShotMediaRow[] | undefined> {
   const list = await rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { kind: 'drama.storyboard_table' })
   if (!list.ok || !Array.isArray(list.data.elements)) return undefined
@@ -182,13 +190,14 @@ export function EikonaMainPage({
   const [jobs, setJobs] = useState<JobRecordV1[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [previewRevision, setPreviewRevision] = useState(0)
+  const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'rejected'>>({})
   const [notice, setNotice] = useState<WorkspaceNotice | null>(null)
   const [specModel, setSpecModel] = useState('openai/gpt-image-2.5-sunburst')
   const [specSize, setSpecSize] = useState('1152x2048')
   const [specQuality, setSpecQuality] = useState('high')
   const [specResult, setSpecResult] = useState<string>('')
   const lang = coreT('langCode')
-  const { mediaRevision } = useGenerationStore()
+  const { mediaRevision, open: generationOpen } = useGenerationStore()
 
   const loadEikona = useCallback(async () => {
     const res = await rpc.call<{ elements: MuweaveElementSummaryV1[] }>('bundle.elements.list', { domain: 'eikona' })
@@ -215,11 +224,30 @@ export function EikonaMainPage({
     ])
     setShots(shotRows)
     if (jobResult.ok) setJobs(jobResult.data.jobs ?? [])
+    setPreviewRevision((revision) => revision + 1)
   }, [rpc, loadEikona])
 
   useEffect(() => {
     void refreshVisual()
   }, [refreshVisual, mediaRevision])
+
+  const hasActiveImageJob = jobs.some(isGenerating)
+  useEffect(() => {
+    if (!hasActiveImageJob && !generationOpen) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    const poll = async () => {
+      const result = await rpc.call<{ jobs?: JobRecordV1[] }>('job.list', {})
+      if (cancelled) return
+      if (result.ok) setJobs(result.data.jobs ?? [])
+      timer = setTimeout(() => void poll(), generationOpen ? 2000 : 5000)
+    }
+    void poll()
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [rpc, generationOpen, hasActiveImageJob])
 
   const refreshPreview = async () => {
     setRefreshing(true)
@@ -230,7 +258,6 @@ export function EikonaMainPage({
         return
       }
       await refreshVisual()
-      setPreviewRevision((revision) => revision + 1)
     } finally {
       setRefreshing(false)
     }
@@ -253,7 +280,8 @@ export function EikonaMainPage({
         ? { tone: 'ok', text: `${artifactId} · ${verb} · ${t('decisionDone')}` }
         : { tone: 'bad', text: `${res.error.code}: ${res.error.message}` },
     )
-    await loadEikona()
+    if (res.ok) setDecisions((previous) => ({ ...previous, [`${runId}:${artifactId}`]: decision === 'accept' ? 'accepted' : 'rejected' }))
+    await refreshVisual()
   }
 
   const runControlledHandoff = async (handle: string, kind: 'bind' | 'handoff') => {
@@ -269,7 +297,7 @@ export function EikonaMainPage({
         ? { tone: 'ok', text: `${handle} · ${verb} · ${t('handoffDone')}` }
         : { tone: 'bad', text: `${res.error.code}: ${res.error.message}` },
     )
-    await loadEikona()
+    await refreshVisual()
   }
 
   const handleSpecCheck = async () => {
@@ -293,51 +321,21 @@ export function EikonaMainPage({
   // Card minimum width drives the column count; zoom widens cards instead of scaling the grid.
   const cardMin = `${(gridCols === 2 ? 18 : 11) * (zoomed ? 1.5 : 1)}rem`
   const firstGroup = candidateGroups[0]
-  const candidateTotal = candidateGroups.reduce((sum, g) => {
-    const pl = (details[g.elementId]?.payload ?? {}) as { candidates?: CandidateItem[] }
-    return sum + (pl.candidates?.length ?? 0)
-  }, 0)
+  const inFlight = jobs.find(isGenerating)
+  const refreshAction = { label: '刷新预览', disabled: refreshing, onAction: () => void refreshPreview() }
+  const generateAction = { label: '生成视觉候选', onAction: generate }
 
   return (
     <WorkspaceShell
       title={t('panelTitle')}
       rpc={rpc}
       t={coreT}
-      onSyncRequested={loadEikona}
+      compact
+      breadcrumbs={<>{firstGroup?.episodeRef ? <span>{firstGroup.episodeRef} / </span> : null}<span>{t('roomTitle')}</span></>}
+      onSyncRequested={refreshVisual}
       notice={notice}
       onDismissNotice={() => setNotice(null)}
-      hero={
-        <RoomHero
-          eyebrow={t('heroEyebrow')}
-          title={firstGroup?.title ?? t('heroEmptyTitle')}
-          lede={t('heroLede')}
-          stats={[
-            { icon: 'image', value: candidateTotal, label: t('candidateCount') },
-            { icon: 'inbox', value: candidateGroups.length, label: t('statGroups') },
-            { icon: 'star', value: masterBindings.length, label: t('statMasters') },
-            { icon: 'sliders', value: scoreCards.length, label: t('statScores') },
-          ]}
-          actions={
-            firstGroup ? (
-              <PillButton
-                icon="at"
-                onClick={() =>
-                  stageItemToFloatingAgent({
-                    kind: 'element',
-                    ref: firstGroup.elementId,
-                    label: firstGroup.title,
-                    serializedLine: `[EikonaRun ref=${firstGroup.sourceRef}]`,
-                  })
-                }
-              >
-                {t('referGroup')}
-              </PillButton>
-            ) : null
-          }
-          cover={<CoverCollage covers={covers} posterTitle={t('roomTitle')} posterMeta="Eikona" />}
-        />
-      }
-      headerActions={
+      stageActions={
         <>
           <Segmented<'2' | '4'>
             label={t('gridLabel')}
@@ -361,7 +359,7 @@ export function EikonaMainPage({
           id: 'gallery',
           label: () => t('tabGallery'),
           render: ({ onPinCompare }) => {
-            if (candidateGroups.length === 0) return <EmptyState icon="image">{coreT('emptyElements')}</EmptyState>
+            if (candidateGroups.length === 0) return inFlight ? <EmptyAction progress={progressFor(inFlight)} /> : <EmptyAction {...generateAction} />
             return (
               <div className="mw-stack" data-gap="lg">
                 {candidateGroups.map((group) => {
@@ -369,95 +367,131 @@ export function EikonaMainPage({
                   const payload = (full?.payload ?? {}) as { runId?: string; candidates?: CandidateItem[] }
                   const runId = payload.runId ?? group.elementId
                   const cands = payload.candidates ?? []
+                  const job = jobs.find((row) => row.owner === 'eikona' && row.ownerJobRef === runId)
                   return (
                     <section key={group.elementId} className="mw-stack">
                       <SectionHead
                         title={group.title}
                         meta={`${cands.length} ${t('candidateCount')}`}
-                        actions={<StatusTag status={group.status} lang={lang} />}
+                        actions={
+                          <PillButton
+                            icon="at"
+                            onClick={() => stageItemToFloatingAgent({
+                              kind: 'element',
+                              ref: group.elementId,
+                              label: group.title,
+                              serializedLine: `[EikonaRun ref=${group.sourceRef}]`,
+                            })}
+                          >
+                            {t('referGroup')}
+                          </PillButton>
+                        }
                       />
-                      <Masonry min={cardMin} data-eikona-compare-grid={String(gridCols)}>
-                        {cands.map((cand) => (
-                          <MediaCard
-                            key={cand.artifactId}
-                            ratio={cand.width && cand.height ? `${cand.width} / ${cand.height}` : '3 / 4'}
-                            media={<CandidateMediaPreview rpc={rpc} sha256={cand.sha256} alt={cand.artifactId} t={t} />}
-                            title={cand.artifactId}
-                            meta={[cand.modelRef.split('/').pop(), cand.width && cand.height ? `${cand.width}×${cand.height}` : '', cand.role]
-                              .filter(Boolean)
-                              .join(' · ')}
-                            actions={
-                              <>
-                                {cand.handle ? (
+                      {cands.length === 0 ? (
+                        job && isGenerating(job) ? <EmptyAction progress={progressFor(job)} /> : <EmptyAction {...(full ? generateAction : refreshAction)} />
+                      ) : (
+                        <Masonry min={cardMin} data-eikona-compare-grid={String(gridCols)}>
+                          {cands.map((cand) => {
+                            const key = `${group.elementId}:${cand.artifactId}`
+                            const slot = job?.slots.find((item) => item.ownerRef === cand.artifactId)
+                            const blob = group.mediaBlobs?.find((item) => item.mimeType.startsWith('image/') && (item.blobDigest === cand.sha256 || item.label === cand.artifactId))
+                            const sha256 = blob?.blobDigest ?? slot?.sha256 ?? cand.sha256
+                            const image = {
+                              rpc, sha256, mimeType: blob?.mimeType ?? slot?.mime, alt: cand.artifactId,
+                              fallback: job && isGenerating(job) ? { progress: progressFor(job) } : refreshAction,
+                            }
+                            const boundShots = shots && new Set(shots.filter((row) => row.shotRef && row.linkedMedia?.some((link) =>
+                              (Boolean(sha256) && link.sha256 === sha256) || (link.elementId === group.elementId && link.artifactId === cand.artifactId),
+                            )).map((row) => row.shotRef))
+                            return (
+                              <MediaCard
+                                key={`${key}:${previewRevision}`}
+                                ratio={cand.width && cand.height ? `${cand.width} / ${cand.height}` : '3 / 4'}
+                                image={image}
+                                lang={lang}
+                                version={group.sourceRevision}
+                                review={decisions[`${runId}:${cand.artifactId}`] ?? slot?.review ?? group.status}
+                                shotCount={boundShots?.size}
+                                stale={group.stale}
+                                selected={selectedArtifact === key}
+                                title={<button type="button" className="mw-card-hit" aria-pressed={selectedArtifact === key} onClick={() => setSelectedArtifact(key)}>{cand.artifactId}</button>}
+                                meta={[cand.modelRef?.split('/').pop(), cand.width && cand.height ? `${cand.width}×${cand.height}` : '', cand.role]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                                actions={
                                   <>
+                                    {cand.handle ? (
+                                      <>
+                                        <IconButton
+                                          icon="star"
+                                          size="sm"
+                                          label={t('bindMaster')}
+                                          onClick={() => void runControlledHandoff(cand.handle, 'bind')}
+                                        />
+                                        <IconButton
+                                          icon="handoff"
+                                          size="sm"
+                                          label={t('handoffAsset')}
+                                          onClick={() => void runControlledHandoff(cand.handle, 'handoff')}
+                                        />
+                                      </>
+                                    ) : null}
                                     <IconButton
-                                      icon="star"
+                                      icon="pin"
                                       size="sm"
-                                      label={t('bindMaster')}
-                                      onClick={() => void runControlledHandoff(cand.handle, 'bind')}
+                                      label={coreT('openCompareB')}
+                                      onClick={() => {
+                                        setSelectedArtifact(key)
+                                        onPinCompare(
+                                          <div className="mw-stack" data-gap="sm" data-eikona-review-compare="true">
+                                            <MediaThumbnail {...image} />
+                                            <strong className="mw-dsh-code">{cand.artifactId}</strong>
+                                            <p className="mw-dsh-muted">{cand.promptExcerpt}</p>
+                                            <span className="mw-dsh-code">{cand.uri}</span>
+                                          </div>,
+                                        )
+                                      }}
                                     />
                                     <IconButton
-                                      icon="handoff"
+                                      icon="at"
                                       size="sm"
-                                      label={t('handoffAsset')}
-                                      onClick={() => void runControlledHandoff(cand.handle, 'handoff')}
+                                      label={coreT('insertRefChip')}
+                                      onClick={() =>
+                                        stageItemToFloatingAgent({
+                                          kind: 'element',
+                                          ref: `${group.elementId}:${cand.artifactId}`,
+                                          label: `${group.title}/${cand.artifactId}`,
+                                          serializedLine: `[EikonaArtifact run=${runId} artifact=${cand.artifactId} uri=${cand.uri}]`,
+                                        })
+                                      }
                                     />
                                   </>
-                                ) : null}
-                                <IconButton
-                                  icon="pin"
-                                  size="sm"
-                                  label={coreT('openCompareB')}
-                                  onClick={() =>
-                                    onPinCompare(
-                                      <div className="mw-stack" data-gap="sm">
-                                        <CandidateMediaPreview rpc={rpc} sha256={cand.sha256} alt={cand.artifactId} t={t} />
-                                        <strong className="mw-dsh-code">{cand.artifactId}</strong>
-                                        <p className="mw-dsh-muted">{cand.promptExcerpt}</p>
-                                        <span className="mw-dsh-code">{cand.uri}</span>
-                                      </div>,
-                                    )
-                                  }
-                                />
-                                <IconButton
-                                  icon="at"
-                                  size="sm"
-                                  label={coreT('insertRefChip')}
-                                  onClick={() =>
-                                    stageItemToFloatingAgent({
-                                      kind: 'element',
-                                      ref: `${group.elementId}:${cand.artifactId}`,
-                                      label: `${group.title}/${cand.artifactId}`,
-                                      serializedLine: `[EikonaArtifact run=${runId} artifact=${cand.artifactId} uri=${cand.uri}]`,
-                                    })
-                                  }
-                                />
-                              </>
-                            }
-                          >
-                            {cand.promptExcerpt ? (
-                              <span className="mw-dsh-muted mw-clamp-2" title={cand.promptExcerpt}>
-                                {cand.promptExcerpt}
-                              </span>
-                            ) : null}
-                            {typeof cand.overallScore === 'number' ? (
-                              <ScoreMeter label={t('overallScore')} value={cand.overallScore} />
-                            ) : null}
-                            <div className="ek-cand-actions">
-                              <PillButton
-                                variant="primary"
-                                icon="check"
-                                onClick={() => void runControlledDecision(runId, cand.artifactId, 'accept')}
+                                }
                               >
-                                {t('acceptCandidate')}
-                              </PillButton>
-                              <PillButton onClick={() => void runControlledDecision(runId, cand.artifactId, 'reject')}>
-                                {t('rejectCandidate')}
-                              </PillButton>
-                            </div>
-                          </MediaCard>
-                        ))}
-                      </Masonry>
+                                {cand.promptExcerpt ? (
+                                  <span className="mw-dsh-muted mw-clamp-2" title={cand.promptExcerpt}>
+                                    {cand.promptExcerpt}
+                                  </span>
+                                ) : null}
+                                {typeof cand.overallScore === 'number' ? (
+                                  <ScoreMeter label={t('overallScore')} value={cand.overallScore} />
+                                ) : null}
+                                <div className="ek-cand-actions">
+                                  <PillButton
+                                    icon="check"
+                                    onClick={() => void runControlledDecision(runId, cand.artifactId, 'accept')}
+                                  >
+                                    {t('acceptCandidate')}
+                                  </PillButton>
+                                  <PillButton onClick={() => void runControlledDecision(runId, cand.artifactId, 'reject')}>
+                                    {t('rejectCandidate')}
+                                  </PillButton>
+                                </div>
+                              </MediaCard>
+                            )
+                          })}
+                        </Masonry>
+                      )}
                     </section>
                   )
                 })}
@@ -470,7 +504,7 @@ export function EikonaMainPage({
           label: () => t('tabMasters'),
           render: () =>
             masterBindings.length === 0 ? (
-              <EmptyState icon="star">{coreT('emptyElements')}</EmptyState>
+              <EmptyAction {...refreshAction} />
             ) : (
               <div className="mw-grid-auto" style={{ '--mw-card-min': '16rem' } as CSSProperties}>
                 {masterBindings.map((m) => (
@@ -491,7 +525,7 @@ export function EikonaMainPage({
           label: () => t('tabScores'),
           render: () =>
             scoreCards.length === 0 ? (
-              <EmptyState>{coreT('emptyElements')}</EmptyState>
+              <EmptyAction {...refreshAction} />
             ) : (
               <div className="mw-stack" data-gap="lg">
                 {scoreCards.map((sc) => {
@@ -505,7 +539,7 @@ export function EikonaMainPage({
                     <section key={sc.elementId} className="mw-stack" data-gap="sm">
                       <SectionHead title={sc.title} meta={sc.subtitle} />
                       {rows.length === 0 ? (
-                        <pre className="mw-pre">{JSON.stringify(pl, null, 2)}</pre>
+                        <EmptyAction {...refreshAction} />
                       ) : (
                         <div className="mw-grid-auto" style={{ '--mw-card-min': '15rem' } as CSSProperties}>
                           {rows.map((row, idx) => {
@@ -571,8 +605,8 @@ export function EikonaMainPage({
                     value={specQuality}
                     onChange={(e) => setSpecQuality(e.target.value)}
                   >
-                    <option value="high">high (Sunburst 必需)</option>
-                    <option value="low">low</option>
+                    <option value="high">高（Sunburst 必需）</option>
+                    <option value="low">低</option>
                   </select>
                 </label>
               </div>

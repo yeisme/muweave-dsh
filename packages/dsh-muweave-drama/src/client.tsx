@@ -1,21 +1,19 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import {
   CompanionList,
-  CoverCollage,
-  EmptyState,
+  EmptyAction,
   IconButton,
   MediaCard,
   NoteCard,
-  Poster,
-  RoomHero,
   SceneMini,
   SectionHead,
   Segmented,
   ShotGenerateButton,
-  ShotMedia,
   StatusTag,
   ToneDot,
   WorkspaceShell,
+  keyframeImage,
+  shotGenerationAction,
   statusTone,
   shotDescription,
   registerMuweaveCreatorPlugin,
@@ -26,7 +24,7 @@ import {
   type MuweaveRpcClient,
   type LinkedMediaRef,
   type MuweaveTranslator,
-  useProjectCovers,
+  useGenerationStore,
 } from '@yeisme/dsh-muweave-core/client'
 
 export const name = '@yeisme/dsh-muweave-drama'
@@ -63,11 +61,6 @@ const zh = {
   scriptSide: '剧本场次卡 (Auctra)',
   shotSide: '对应拆解镜头 (Scaena)',
   seconds: '秒',
-  heroEyebrow: 'Scaena · 分镜生产',
-  heroEmptyTitle: '还没有分镜',
-  heroLede: '一镜一格地看本集：时长、要素和资产是否就绪。',
-  statDuration: '秒总时长',
-  statReady: '项资产就绪',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -97,11 +90,6 @@ const en: Record<keyof typeof zh, string> = {
   scriptSide: 'Script Scene Cards (Auctra)',
   shotSide: 'Breakdown Shots (Scaena)',
   seconds: 's',
-  heroEyebrow: 'Scaena · Production',
-  heroEmptyTitle: 'No storyboard yet',
-  heroLede: 'The episode shot by shot: duration, fields and whether assets are ready.',
-  statDuration: 's total',
-  statReady: 'assets ready',
 }
 
 interface StoryboardRow {
@@ -165,6 +153,10 @@ export function DramaMainPage({
   const [dramaElements, setDramaElements] = useState<MuweaveElementSummaryV1[]>([])
   const [scriptCards, setScriptCards] = useState<MuweaveElementSummaryV1[]>([])
   const [details, setDetails] = useState<Record<string, MuweaveElementV1>>({})
+  const [selectedShot, setSelectedShot] = useState<string>()
+  const [syncing, setSyncing] = useState(false)
+  const [syncError, setSyncError] = useState<string>()
+  const { mediaRevision } = useGenerationStore()
 
   const loadAll = useCallback(async () => {
     const [dRes, sRes] = await Promise.all([
@@ -195,23 +187,26 @@ export function DramaMainPage({
 
   useEffect(() => {
     void loadAll()
-  }, [loadAll])
+  }, [loadAll, mediaRevision])
+
+  const sync = async () => {
+    setSyncing(true)
+    setSyncError(undefined)
+    try {
+      const result = await rpc.call('bundle.sync', {})
+      if (result.ok) await loadAll()
+      else setSyncError(result.error.message)
+    } finally {
+      setSyncing(false)
+    }
+  }
+  const syncAction = { label: '同步分镜', disabled: syncing, onAction: () => void sync() }
 
   const storyboards = dramaElements.filter((e) => e.kind === 'drama.storyboard_table')
   const assetTables = dramaElements.filter((e) => e.kind === 'drama.asset_readiness')
   const editTimelines = dramaElements.filter((e) => e.kind === 'drama.edit_timeline')
   const lang = coreT('langCode')
-  const covers = useProjectCovers(rpc, 3)
   const [view, setView] = useState<ViewMode>('cards')
-
-  const shotRows = storyboards.flatMap(
-    (sb) => ((details[sb.elementId]?.payload ?? {}) as { rows?: StoryboardRow[] }).rows ?? [],
-  )
-  const totalMicros = shotRows.reduce((sum, r) => sum + r.plannedDurationMicros, 0)
-  const assetRows = assetTables.flatMap(
-    (at) => ((details[at.elementId]?.payload ?? {}) as { assets?: AssetRow[] }).assets ?? [],
-  )
-  const readyCount = assetRows.filter((a) => Object.values(a.axes).every((raw) => statusTone(raw) === 'ok')).length
   const firstBoard = storyboards[0]
 
   const viewSwitch = (
@@ -231,27 +226,18 @@ export function DramaMainPage({
       title={t('panelTitle')}
       rpc={rpc}
       t={coreT}
+      compact
+      breadcrumbs={<>{firstBoard?.episodeRef ? <span>{firstBoard.episodeRef} / </span> : null}<span>{t('roomTitle')}</span></>}
       onSyncRequested={loadAll}
-      hero={
-        <RoomHero
-          eyebrow={t('heroEyebrow')}
-          title={firstBoard?.title ?? t('heroEmptyTitle')}
-          lede={firstBoard?.subtitle ?? t('heroLede')}
-          stats={[
-            { icon: 'image', value: shotRows.length, label: t('shotCount') },
-            { icon: 'play', value: seconds(totalMicros), label: t('statDuration') },
-            { icon: 'check', value: `${readyCount}/${assetRows.length}`, label: t('statReady') },
-          ]}
-          cover={<CoverCollage covers={covers} posterTitle={firstBoard?.title ?? t('roomTitle')} posterMeta="Scaena" />}
-        />
-      }
+      notice={syncError ? { tone: 'bad', text: syncError } : undefined}
+      onDismissNotice={() => setSyncError(undefined)}
       stageTabs={[
         {
           id: 'storyboard',
           label: () => t('tabStoryboard'),
           render: () =>
             storyboards.length === 0 ? (
-              <EmptyState>{coreT('emptyElements')}</EmptyState>
+              <EmptyAction {...syncAction} />
             ) : (
               <div className="mw-stack" data-gap="lg">
                 {storyboards.map((sb) => {
@@ -270,9 +256,19 @@ export function DramaMainPage({
                           </div>
                         }
                       />
-                      {view === 'cards' ? (
+                      {rows.length === 0 ? (
+                        <EmptyAction {...syncAction} />
+                      ) : view === 'cards' ? (
                         <div className="mw-board" data-drama-shot-board="true">
                           {rows.map((row) => {
+                            const shotKey = `${sb.elementId}:${row.shotRef}`
+                            const image = keyframeImage(row.linkedMedia)
+                            const generation = {
+                              t: coreT,
+                              shotRef: row.shotRef,
+                              prompt: shotDescription(row.cells, row.restrictedFields),
+                              anchor: { episodeRef: sb.episodeRef ?? sb.sourceRef, sceneRef: row.sceneRef },
+                            }
                             const fields = Object.entries(row.cells)
                               .filter(([k]) => !row.restrictedFields.includes(k))
                               .map(([, v]) => formatCell(v))
@@ -281,15 +277,25 @@ export function DramaMainPage({
                                 key={row.shotRef}
                                 ratio="16 / 10"
                                 data-muweave-shot-card={row.shotRef}
-                                media={
-                                  <ShotMedia
-                                    rpc={rpc}
-                                    linked={row.linkedMedia}
-                                    alt={`${pad2(row.order)} ${row.shotRef}`}
-                                    poster={<Poster title={pad2(row.order)} meta={row.sceneRef} />}
-                                  />
+                                image={{
+                                  rpc,
+                                  sha256: image?.sha256,
+                                  mimeType: image?.mime,
+                                  alt: `第 ${row.order} 镜`,
+                                  'data-muweave-shot-image': 'true',
+                                  fallback: shotGenerationAction(generation),
+                                }}
+                                lang={lang}
+                                version={sb.sourceRevision}
+                                review={sb.status}
+                                shotCount={row.linkedMedia?.length ? 1 : 0}
+                                stale={sb.stale}
+                                selected={selectedShot === shotKey}
+                                title={
+                                  <button type="button" className="mw-card-hit" aria-pressed={selectedShot === shotKey} onClick={() => setSelectedShot(shotKey)}>
+                                    {`${pad2(row.order)} · ${seconds(row.plannedDurationMicros)} ${t('seconds')}`}
+                                  </button>
                                 }
-                                title={`${pad2(row.order)} · ${seconds(row.plannedDurationMicros)} ${t('seconds')}`}
                                 meta={<span className="mw-dsh-code">{row.shotRef}</span>}
                                 actions={
                                   <IconButton
@@ -312,12 +318,7 @@ export function DramaMainPage({
                                     {fields.join(' · ')}
                                   </span>
                                 ) : null}
-                                <ShotGenerateButton
-                                  t={coreT}
-                                  shotRef={row.shotRef}
-                                  prompt={shotDescription(row.cells, row.restrictedFields)}
-                                  anchor={{ ...(sb.sourceRef ? { episodeRef: sb.sourceRef } : {}), sceneRef: row.sceneRef }}
-                                />
+                                <div className="mw-media-ready-action"><ShotGenerateButton {...generation} /></div>
                               </MediaCard>
                             )
                           })}
@@ -393,7 +394,7 @@ export function DramaMainPage({
           label: () => t('tabAssets'),
           render: () =>
             assetTables.length === 0 ? (
-              <EmptyState>{coreT('emptyElements')}</EmptyState>
+              <EmptyAction {...syncAction} />
             ) : (
               <div className="mw-stack" data-gap="lg">
                 {assetTables.map((at) => {
@@ -476,7 +477,7 @@ export function DramaMainPage({
           label: () => t('tabTimeline'),
           render: () =>
             editTimelines.length === 0 ? (
-              <EmptyState>{coreT('emptyElements')}</EmptyState>
+              <EmptyAction {...syncAction} />
             ) : (
               <div className="mw-stack" data-gap="lg">
                 {editTimelines.map((et) => {
@@ -555,7 +556,7 @@ export function DramaMainPage({
               return pl.rows ?? []
             })
             if (scriptCards.length === 0 && allRows.length === 0) {
-              return <EmptyState>{coreT('emptyElements')}</EmptyState>
+              return <EmptyAction {...syncAction} />
             }
             return (
               <div className="mw-split-2" data-drama-script-sidebyside="true">

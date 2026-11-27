@@ -616,7 +616,7 @@ export {
   useGenerationStore,
   type GenerationOpenRequest,
 } from './generation-store'
-export { ShotGenerateButton, ShotMedia, keyframeDigest, shotDescription, type LinkedMediaRef } from './shot-media'
+export { ShotGenerateButton, ShotMedia, keyframeDigest, keyframeImage, shotDescription, shotGenerationAction, type LinkedMediaRef } from './shot-media'
 export { ElementChip, SkillChip, FileChip, GenerateChip } from './composer-chips'
 export { COMPOSER_ACTIONS, composerActionDisabledReason } from './composer-actions'
 export { ToolRunCard } from './tool-run-card'

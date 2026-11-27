@@ -1,21 +1,22 @@
 /**
  * Overview stage workbench (desk v8): one stage at three densities — L1 the primary artifact, L2 the
- * variants of the job that produced it, L3 the pending queue — plus a version band. Every level shows
- * an honest placeholder when the bundle has no cover, slots or revision; nothing is invented.
+ * variants of the job that produced it, L3 the pending queue, plus a version band.
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
-  EmptyState,
+  EmptyAction,
+  MediaCard,
+  MediaThumbnail,
+  openGeneration,
+  type EmptyActionProps,
   Icon,
-  StatusTag,
   formatKeyHint,
   getActiveTheaterRoomId,
   isEditableTarget,
   keyBinding,
   matchKey,
   statusLabel,
-  useMediaUrl,
   type JobRecordV1,
   type JobSlotV1,
   type MuweaveElementSummaryV1,
@@ -33,7 +34,7 @@ import {
   variantSubject,
   versionLabel,
   type CompareSubject,
-  type StageId,
+  type SpineStageId,
 } from './stage-map'
 
 const OVERVIEW_ROOM_ID = 'muweave-workbench'
@@ -96,25 +97,18 @@ export function queueStagger(index: number): number {
   return index >= 0 && index < QUEUE_STAGGER_LIMIT ? index : 0
 }
 
-/** Thumbnail with a real image when the media route resolves, else the fill + hairline grid placeholder. */
-export function StageThumb({
-  rpc,
-  sha256,
-  alt,
-  shape,
-  children,
-}: {
+/** Compare sides keep their layout while sharing the Range preview and fallback. */
+export function StageThumb({ rpc, sha256, mimeType, alt, shape, fallback }: {
   rpc: MuweaveRpcClient
   sha256?: string
+  mimeType?: string
   alt: string
-  shape: 'wide' | 'variant' | 'compare'
-  children?: ReactNode
+  shape: 'compare' | 'wide'
+  fallback: EmptyActionProps
 }) {
-  const url = useMediaUrl(rpc, sha256)
   return (
-    <div className="mw-stage-thumb" data-shape={shape} data-empty={url ? 'false' : 'true'}>
-      {url ? <img src={url} alt={alt} loading="lazy" /> : null}
-      {children}
+    <div className="mw-stage-thumb" data-shape={shape} data-empty={!sha256 ? 'true' : undefined}>
+      <MediaThumbnail rpc={rpc} sha256={sha256} mimeType={mimeType} alt={alt} fallback={fallback} />
     </div>
   )
 }
@@ -157,6 +151,8 @@ function VariantBand({
   const accepted = slots.find((s) => s.review === 'accepted')?.slotId
   const [chosen, setChosen] = useState<string | undefined>(accepted)
   const en = lang === 'en'
+  const completed = job.slots.filter((slot) => slot.status === 'done' || slot.status === 'failed' || slot.status === 'skipped').length
+  const progress = job.slots.length ? (100 * completed) / job.slots.length : undefined
   return (
     <section className="mw-stage-level" data-level="L2" data-stage-region="L2">
       <div className="mw-stage-eyebrow">
@@ -171,21 +167,26 @@ function VariantBand({
           const isImage = typeof slot.mime === 'string' && slot.mime.startsWith('image/')
           return (
             <li key={slot.slotId} className="mw-stage-variant-cell">
-              <button
-                type="button"
-                className="mw-stage-variant"
-                data-current={chosen === slot.slotId ? 'true' : 'false'}
-                data-review={slot.review}
-                aria-label={`${tag} · ${slot.label ?? slot.status}`}
-                onClick={() => setChosen(slot.slotId)}
+              <MediaCard
+                ratio="4 / 3"
+                selected={chosen === slot.slotId}
+                review={slot.review}
+                image={{ rpc, sha256: isImage ? slot.sha256 : undefined, mimeType: slot.mime, alt: tag,
+                  fallback: slot.status === 'pending' || slot.status === 'running'
+                    ? { progress }
+                    : { label: '查看候选', onAction: () => setChosen(slot.slotId) } }}
               >
-                <StageThumb rpc={rpc} sha256={isImage ? slot.sha256 : undefined} alt={tag} shape="variant">
+                <button
+                  type="button"
+                  className="mw-stage-variant mw-card-hit"
+                  data-current={chosen === slot.slotId ? 'true' : 'false'}
+                  aria-pressed={chosen === slot.slotId}
+                  onClick={() => setChosen(slot.slotId)}
+                >
                   <span className="mw-stage-variant-tag">{tag}</span>
-                </StageThumb>
-                <span className="mw-stage-variant-cap">
-                  {slot.review === 'accepted' ? (en ? 'Accepted' : '已采用') : slot.label ?? statusLabel(slot.status, lang)}
-                </span>
-              </button>
+                  <span className="mw-stage-variant-cap">{slot.label ?? statusLabel(slot.status, lang)}</span>
+                </button>
+              </MediaCard>
               {onPinVariant ? (
                 <button
                   type="button"
@@ -257,7 +258,7 @@ export function StageWorkbench({
   onSync,
 }: {
   rpc: MuweaveRpcClient
-  stage: StageId
+  stage: SpineStageId
   rows: readonly MuweaveElementSummaryV1[]
   lang: string
   selectedId?: string
@@ -359,19 +360,11 @@ export function StageWorkbench({
       <div key={stage} ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
         {head}
         <div className="mw-stage-empty" data-stage-region="L1" data-stage-empty="true">
-          <EmptyState>
-            {en ? 'Nothing produced in this stage yet.' : '本阶段还没有产物'}
-            {stage === 'sound' ? (
-              <small>{en ? 'No owner produces sound elements yet; this stage lights up once one does.' : '还没有 owner 产出声音元件，接入数据后这一阶段才会亮起。'}</small>
-            ) : null}
-          </EmptyState>
-          {/* Sound has no owner to collect from, so a sync there would promise something it cannot do. */}
-          {onSync && stage !== 'sound' ? (
-            <button type="button" className="mw-dsh-btn" data-size="sm" data-stage-sync="true" onClick={onSync}>
-              <Icon name="sync" />
-              {en ? 'Go sync' : '去同步'}
-            </button>
-          ) : null}
+          {stage !== 'sound' && onSync ? (
+            <EmptyAction label={en ? 'Sync this stage' : '本阶段还没有产物 · 去同步'} onAction={onSync} data-stage-sync="true" />
+          ) : (
+            <EmptyAction label={en ? 'Open generation' : '本阶段还没有产物 · 打开生成'} onAction={(trigger) => openGeneration({ stage: stage === 'final' ? undefined : stage }, trigger)} />
+          )}
         </div>
       </div>
     )
@@ -379,7 +372,7 @@ export function StageWorkbench({
 
   const cover = coverDigest(primary)
 
-  // The root is keyed by stage (both branches) so motion spec M1's fade-in replays on every switch.
+  const preview = primary.mediaBlobs?.find((blob) => blob.blobDigest === cover)
 
   return (
     <div key={stage} ref={rootRef} className="mw-stage-work" data-stage-workbench="true" data-stage={stage}>
@@ -389,44 +382,44 @@ export function StageWorkbench({
           <div className="mw-stage-eyebrow">
             <span>{en ? 'Primary' : '主产物'}</span>
           </div>
-          <article className="mw-stage-primary" data-current={selectedId === primary.elementId ? 'true' : 'false'} data-element-id={primary.elementId}>
-            <StageThumb rpc={rpc} sha256={cover} alt={primary.title} shape="wide">
-              {cover ? null : <span className="mw-stage-thumb-note">{en ? 'No cover' : '暂无封面'}</span>}
-            </StageThumb>
-            <div className="mw-stage-primary-body">
-              <span className="mw-stage-primary-title">{primary.title}</span>
-              <span className="mw-stage-primary-actions">
-                <button type="button" className="mw-dsh-btn" data-variant="primary" data-size="sm" onClick={() => onSelect(primary.elementId)}>
-                  {en ? 'Review' : '审阅'}
-                </button>
-                <button
-                  ref={baselineBtnRef}
-                  type="button"
-                  className="mw-dsh-btn"
-                  data-size="sm"
-                  aria-keyshortcuts="c"
-                  title={`${en ? 'Compare baseline' : '对比基线'} (${formatKeyHint('c')})`}
-                  onClick={(ev) => pinBaseline(primary, ev.currentTarget)}
-                >
-                  {en ? 'Compare baseline' : '对比基线'}
-                </button>
-                {/* Outside the button so its name stays the label; aria-keyshortcuts carries the key. */}
-                <kbd className="mw-key-hint" aria-hidden="true">
-                  {formatKeyHint('c')}
-                </kbd>
-              </span>
-              <span className="mw-stage-primary-status">
-                <StatusTag status={primary.stale ? 'stale' : primary.status} lang={lang} />
-                {primary.subtitle ? <span className="mw-clamp-2">{primary.subtitle}</span> : null}
-              </span>
-            </div>
-          </article>
+          <MediaCard
+            ratio="16 / 9"
+            data-element-id={primary.elementId}
+            data-current={selectedId === primary.elementId ? 'true' : 'false'}
+            selected={selectedId === primary.elementId}
+            title={primary.title}
+            meta={primary.subtitle}
+            version={version}
+            review={primary.status}
+            stale={primary.stale}
+            shotCount={new Set(primary.shotRefs ?? []).size}
+            lang={lang}
+            media={<StageThumb rpc={rpc} sha256={cover} mimeType={preview?.mimeType} alt={primary.title} shape="wide" fallback={{ label: '查看产物', onAction: () => onSelect(primary.elementId) }} />}
+          >
+            <span className="mw-stage-primary-actions">
+              {cover ? <button type="button" className="mw-dsh-btn" data-size="sm" onClick={() => onSelect(primary.elementId)}>
+                {en ? 'Review' : '审阅'}
+              </button> : null}
+              <button
+                ref={baselineBtnRef}
+                type="button"
+                className="mw-dsh-btn"
+                data-size="sm"
+                aria-keyshortcuts="c"
+                title={formatKeyHint('c')}
+                onClick={(ev) => pinBaseline(primary, ev.currentTarget)}
+              >
+                {en ? 'Compare baseline' : '对比基线'}
+              </button>
+              <kbd className="mw-key-hint" aria-hidden="true">{formatKeyHint('c')}</kbd>
+            </span>
+          </MediaCard>
         </section>
         <div className="mw-stage-side">
           {slots.length > 1 && job ? <VariantBand key={job.jobId} rpc={rpc} job={job} slots={slots} version={version} lang={lang} onPinVariant={onPinVariant} /> : null}
           <dl className="mw-stage-kv">
             <div>
-              <dt>owner</dt>
+              <dt>来源</dt>
               <dd>
                 <span className="mw-stage-owner">{primary.sourceOwner}</span>
               </dd>
@@ -503,7 +496,7 @@ export function StageWorkbench({
             </span>
           </>
         ) : (
-          <span className="mw-stage-quiet">{en ? 'The owner reports no revision for this element.' : 'owner 未提供该元件的修订号。'}</span>
+          <span className="mw-stage-quiet">{en ? 'The owner reports no revision for this element.' : '来源未提供修订号。'}</span>
         )}
         {primary.stale ? (
           <span className="mw-stage-badge" data-tone="warn">

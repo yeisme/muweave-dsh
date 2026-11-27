@@ -19,7 +19,11 @@ export interface LinkedMediaRef {
 
 /** The keyframe digest to show: the first image link that carries bytes. */
 export function keyframeDigest(linked: readonly LinkedMediaRef[] | undefined): string | undefined {
-  return linked?.find((m) => m.sha256 && (!m.mime || m.mime.startsWith('image/')) && (m.role === 'keyframe' || m.role === 'reference'))?.sha256
+  return keyframeImage(linked)?.sha256
+}
+
+export function keyframeImage(linked: readonly LinkedMediaRef[] | undefined): LinkedMediaRef | undefined {
+  return linked?.find((m) => m.sha256 && (!m.mime || m.mime.startsWith('image/')) && (m.role === 'keyframe' || m.role === 'reference'))
 }
 
 /** Linked keyframe image when present, else the typographic poster the caller passes. */
@@ -34,7 +38,8 @@ export function ShotMedia({
   alt: string
   poster: ReactNode
 }) {
-  const url = useMediaUrl(rpc, keyframeDigest(linked))
+  const image = keyframeImage(linked)
+  const url = useMediaUrl(rpc, image?.sha256, image?.mime)
   return url ? <img className="mw-shot-img" src={url} alt={alt} loading="lazy" data-muweave-shot-image="true" /> : <>{poster}</>
 }
 
@@ -47,7 +52,7 @@ export function shotDescription(cells: Record<string, unknown>, restricted: read
   return best ? String(best[1]) : ''
 }
 
-export function ShotGenerateButton({
+export function shotGenerationAction({
   t,
   shotRef,
   prompt,
@@ -58,26 +63,33 @@ export function ShotGenerateButton({
   prompt: string
   anchor: ProductionAnchorV1
 }) {
+  return {
+    label: tr(t, 'genForShot'),
+    'data-muweave-shot-generate': shotRef,
+    onAction: (trigger: HTMLButtonElement) => openGeneration(
+      {
+        capabilityId: 'eikona.image.generate',
+        input: { prompt },
+        anchor: { ...anchor, shotRef },
+        stage: ['visual', 'storyboard', 'sound'],
+      },
+      trigger,
+    ),
+  }
+}
+
+export function ShotGenerateButton(props: Parameters<typeof shotGenerationAction>[0]) {
+  const { label, onAction, ...attrs } = shotGenerationAction(props)
   return (
     <button
       type="button"
       className="mw-dsh-btn"
       data-variant="quiet"
       data-size="sm"
-      data-muweave-shot-generate={shotRef}
-      onClick={(ev) =>
-        openGeneration(
-          {
-            capabilityId: 'eikona.image.generate',
-            input: { prompt },
-            anchor: { ...anchor, shotRef },
-            stage: ['visual', 'storyboard', 'sound'],
-          },
-          ev.currentTarget,
-        )
-      }
+      onClick={(ev) => onAction(ev.currentTarget)}
+      {...attrs}
     >
-      {tr(t, 'genForShot')}
+      {label}
     </button>
   )
 }
