@@ -47,7 +47,7 @@ export async function createFixture() {
       payload: { runId, reviewState: 'waiting_review', candidates: [currentCandidate, candidate('artifact:rain-detail', detail)] },
     },
     {
-      ...visual, elementId: 'eikona-candidates-street-v3', sourceRef: 'eikona://runs/run:street-v3',
+      ...visual, elementId: 'eikona-candidates-street-v3', sourceRef: 'eikona://runs/' + runId,
       title: '雨夜街口 · 上一版', subtitle: '对比基线 · 保留早期冷色调',
       status: 'accepted', stale: true, sourceRevision: '3', mediaBlobs: [mediaBlob(baseline, baselineCandidate.artifactId)],
       updatedAt: '2026-11-24T08:00:00.000Z',
@@ -147,13 +147,28 @@ export async function createFixture() {
         case 'capability.catalog': return success({ paidEnabled: false, capabilities: [] })
         case 'cli.catalog': return success({ entries: [] })
         case 'job.list': return success({ jobs })
-        case 'task.get': if (payload.taskId === taskId) return success({ task }); break
+        case 'task.get': {
+          if (payload.taskId === taskId) return success({ task })
+          break
+        }
         case 'task.list': return success({ tasks: [task] })
         case 'event.list': return success({
           events: events.filter((event) => (!payload.taskId || event.taskId === payload.taskId) && (!payload.traceId || event.traceId === payload.traceId)),
           nextCursor: null, corruptLines: 0,
         })
         case 'schedule.list': return success(schedule)
+        case 'eikona.feedback.decide':
+        case 'eikona.asset.bind': {
+          const valid = action === 'eikona.feedback.decide'
+            ? payload.runId === runId && payload.artifactId === artifactId && payload.decision === 'accept'
+            : payload.handle === currentCandidate.handle && payload.role === 'scene'
+          if (!valid || !payload.idempotencyKey) break
+          return success({ operation: {
+            operationRef: 'op:visual-' + action, workspaceId, action, owner: 'eikona',
+            idempotencyKey: payload.idempotencyKey, requestDigest: digestOf(JSON.stringify(payload)),
+            status: 'completed', createdAt: reviewTime, updatedAt: reviewTime,
+          } })
+        }
       }
       return { ok: false, generation: 1, error: { code: 'fixture/unavailable', message: '自检数据未提供此操作', retryable: false } }
     },
